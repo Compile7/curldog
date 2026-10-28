@@ -99,7 +99,7 @@ async function api(path, { method: verb, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { setup: data.setup });
   return data;
 }
 
@@ -140,6 +140,7 @@ async function render({ quiet = false } = {}) {
     if (seq !== renderSeq || quiet) return;
     await projectsP.catch(() => {});
     $("#sidebar").innerHTML = str(sidebar());
+    if (err.setup) return void (main.innerHTML = str(setupView()));
     main.innerHTML = str(html`<div class="empty card"><div class="glyph">${icon("alert")}</div><h2>Couldn't load this page</h2><p>${err.message}</p><a class="btn" href="/">Back to overview</a></div>`);
   }
 }
@@ -292,6 +293,25 @@ function timeline(events, withNames) {
   </ul>`;
 }
 
+// Shown after a fresh deploy, until Cloudflare Access protects the app. The API refuses everything until then.
+function setupView() {
+  return html`
+    <div class="welcome empty setup">
+      <div class="glyph">${icon("check")}</div>
+      <h1>Moniwork is deployed</h1>
+      <p>One step left: put it behind Cloudflare Access so only your team can sign in. Until then, the API stays locked.</p>
+      <ol class="setup-steps">
+        <li><b>Turn on Access.</b> In the Cloudflare dashboard, open <b>Workers & Pages → moniwork → Settings → Domains & Routes</b>. Next to your workers.dev URL, choose <b>Enable Cloudflare Access</b>. Using a custom domain? Add a self-hosted Access application for it instead.</li>
+        <li><b>Choose who gets in.</b> Click <b>Manage Cloudflare Access</b> and edit the policy, for example: emails ending in <code>@yourcompany.com</code>.</li>
+        <li><b>Copy two values</b> from that Access application: the <b>Application Audience (AUD) tag</b> and your <b>team domain</b> (like <code>acme.cloudflareaccess.com</code>).</li>
+        <li><b>Add them to the Worker.</b> <b>Settings → Variables and Secrets → Add</b>: <code>ACCESS_TEAM_DOMAIN</code> and <code>ACCESS_AUD</code>. Saving redeploys automatically.</li>
+        <li><b>Reload this page.</b> You'll sign in through Access and land on an empty dashboard.</li>
+      </ol>
+      <p class="hint">Using heartbeat monitors? Also add an Access application for the <code>/hb</code> path with a <b>Bypass</b> policy, so your servers can ping without signing in.</p>
+      <a class="btn primary" href="https://github.com/GovindMalviya/moniwork#2-lock-it-down-with-cloudflare-access" target="_blank" rel="noopener">Setup guide</a>
+    </div>`;
+}
+
 function welcome() {
   return html`
     <div class="welcome empty">
@@ -301,7 +321,7 @@ function welcome() {
       <div class="steps">
         <div class="step"><b>1</b>Create a project for a service or team</div>
         <div class="step"><b>2</b>Add monitors by pasting curl commands</div>
-        <div class="step"><b>3</b>Add a Slack or Discord webhook to get alerts</div>
+        <div class="step"><b>3</b>Connect Google Chat, Telegram or Slack for alerts</div>
       </div>
       <button class="btn primary" data-action="new-project">${icon("plus")}Create your first project</button>
       <button class="btn ghost" data-action="import">${icon("upload")}Or import from Uptime Kuma</button>
@@ -321,9 +341,9 @@ async function viewProject([id]) {
       <div class="head-main">
         <h1>${p.name}</h1>
         ${p.description ? html`<p class="sub">${p.description}</p>` : ""}
-        <p class="notify-line ${p.channels.length ? "" : "none"}">${icon("bell")}${p.channels.length
+        <p class="notify-line ${p.channels.length ? "" : "none"}">${icon("bell")}<span>${p.channels.length
           ? html`Alerts go to ${p.channels.map((c, i) => html`${i ? ", " : ""}<b>${c.name}</b>`)}${p.remind_min ? ` · reminders every ${label(REMIND, p.remind_min)}` : ""}${p.escalate_min ? ` · escalates after ${label(REMIND, p.escalate_min)}` : ""}`
-          : html`No alerts set up. <button class="linkish" data-action="edit-project">Add a channel</button>`}</p>
+          : html`No alerts set up. <button class="linkish" data-action="edit-project">Add a channel</button>`}</span></p>
         ${mutedLine(p.muted_until, "projects", p.id)}
       </div>
       <div class="actions">
@@ -348,7 +368,7 @@ async function viewProject([id]) {
 const label = (list, v) => (list.find(([k]) => k === v) || [0, `${v} min`])[1];
 const until = (ts) => (ts - Date.now() < DAY ? clock(ts) : stamp(ts));
 const mutedLine = (ts, target, id) => (ts > Date.now()
-  ? html`<p class="notify-line muted-line">${icon("bellOff")}Alerts muted until ${until(ts)} <button class="linkish" data-action="unmute" data-target="${target}" data-id="${id}">Unmute</button></p>`
+  ? html`<p class="notify-line muted-line">${icon("bellOff")}<span>Alerts muted until ${until(ts)} <button class="linkish" data-action="unmute" data-target="${target}" data-id="${id}">Unmute</button></span></p>`
   : "");
 
 function filteredMonitors() {

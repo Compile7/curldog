@@ -107,6 +107,9 @@ test("verifies Cloudflare Access JWTs", async () => {
     assert.equal(await getUser(req(t.slice(0, -4) + "AAAA"), env), null);
     assert.equal(await getUser(new Request("https://app/api/me"), env), null);
     assert.equal(await getUser(req(t), {}), null, "fails closed when Access isn't configured");
+    assert.equal(await getUser(req(t), { ...env, ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com/cdn-cgi/access/certs" }), "a@b.co", "accepts a pasted certs URL");
+    assert.equal(await getUser(new Request("https://app/api/me"), { DEV_USER: "x@y.z" }), null, "DEV_USER never applies off localhost");
+    assert.equal(await getUser(new Request("http://localhost:8787/api/me"), {}), "dev@localhost");
   } finally {
     globalThis.fetch = realFetch;
   }

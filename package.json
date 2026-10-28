@@ -1,15 +1,36 @@
 {
   "name": "moniwork",
+  "version": "1.0.0",
+  "description": "Self-hosted HTTP monitoring on Cloudflare Workers. Paste a curl, get alerts in Google Chat, Telegram, Slack or Discord.",
+  "license": "MIT",
   "private": true,
   "type": "module",
+  "repository": { "type": "git", "url": "git+https://github.com/GovindMalviya/moniwork.git" },
+  "homepage": "https://github.com/GovindMalviya/moniwork#readme",
+  "bugs": "https://github.com/GovindMalviya/moniwork/issues",
+  "keywords": ["uptime", "monitoring", "status", "cloudflare-workers", "d1", "curl", "uptime-kuma", "heartbeat", "alerts"],
   "scripts": {
     "dev": "wrangler d1 migrations apply moniwork --local && wrangler dev --local --test-scheduled",
-    "deploy": "wrangler d1 migrations apply moniwork --remote && wrangler deploy",
+    "deploy": "(wrangler d1 migrations apply moniwork --remote || true) && wrangler deploy && wrangler d1 migrations apply moniwork --remote",
+    "seed": "node scripts/seed.mjs > .wrangler/seed.sql && wrangler d1 execute moniwork --local --file .wrangler/seed.sql",
+    "types": "wrangler types --include-env=false",
     "test": "node --test \"src/**/*.test.ts\"",
     "check": "tsc --noEmit && npm test"
   },
+  "engines": { "node": ">=22.18" },
   "devDependencies": {
     "typescript": "^7.0.2",
     "wrangler": "^4.154.0"
+  },
+  "cloudflare": {
+    "label": "Moniwork",
+    "products": ["Workers", "D1", "Durable Objects", "Workers AI"],
+    "categories": ["monitoring"],
+    "docs_url": "https://github.com/GovindMalviya/moniwork#readme",
+    "bindings": {
+      "DB": { "description": "Monitors, check history, incidents and notification channels." },
+      "AI": { "description": "Writes a one-line explanation when a monitor goes down. Runs once per incident." },
+      "PROBER": { "description": "Runs checks from US, EU and Asia for monitors that opt in." }
+    }
   }
 }

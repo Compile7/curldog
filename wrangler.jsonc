@@ -16,21 +16,13 @@
   // One Durable Object per region runs checks for monitors with "check from 3 regions" on.
   "durable_objects": { "bindings": [{ "name": "PROBER", "class_name": "Prober" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Prober"] }],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "moniwork",
-      // Replace with the id printed by `npx wrangler d1 create moniwork`
-      "database_id": "447b920c-65d7-4f0e-8da3-f54cbcfaeae4",
-      "migrations_dir": "migrations"
-    }
-  ],
-  // Cloudflare Access: every /api request must carry a valid Access JWT.
-  "vars": {
-    // Public URL of the app, e.g. "https://moniwork.example.com". Adds "Open in Moniwork" links to alerts.
-    "APP_URL": "https://moniwork.gracker-account.workers.dev",
-    "ACCESS_TEAM_DOMAIN": "c7-dev.cloudflareaccess.com",
-    "ACCESS_AUD": "578984d8b36f6f82a98dae87fe4f4d52073fac18d6886cda40fdb0a665414ba6"
-  },
+  // No database_id: Wrangler creates the database on first deploy and reuses it after.
+  "d1_databases": [{ "binding": "DB", "database_name": "moniwork", "migrations_dir": "migrations" }],
+  // Settings live in the dashboard (Worker → Settings → Variables and Secrets), not in this file:
+  //   ACCESS_TEAM_DOMAIN  e.g. "acme.cloudflareaccess.com"  (required)
+  //   ACCESS_AUD          Access application audience tag    (required)
+  //   APP_URL             e.g. "https://status.acme.com"      (optional, links in alerts)
+  // keep_vars stops a deploy from wiping them.
+  "keep_vars": true,
   "observability": { "enabled": true }
 }

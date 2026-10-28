@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/GovindMalviya/moniwork/discussions
+    about: Ask how to do something, or share how you use Moniwork.
+  - name: Report a security vulnerability
+    url: https://github.com/GovindMalviya/moniwork/security/advisories/new
+    about: Please report security problems privately.

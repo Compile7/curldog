@@ -1,6 +1,6 @@
 import { CurlError, parseCurl } from "./curl.ts";
 import { checkAndRecord, REGIONS, runCheck, validExpected, type MonitorRow, type Row, type Step } from "./check.ts";
-import { getUser, type AuthEnv } from "./auth.ts";
+import { accessConfigured, getUser, type AuthEnv } from "./auth.ts";
 import { ackCard, deliver, send, sendAll, testCard, telegramChats, type Channel, type ChannelType } from "./notify.ts";
 import { refreshExpiry, registrable, remind, weeklyReport } from "./jobs.ts";
 import type { Prober } from "./prober.ts";
@@ -370,7 +370,7 @@ function newMonitor(env: Env, projectId: string, f: ReturnType<typeof monitorFie
 async function runOne(env: Env, m: MonitorRow) {
   const p = await env.DB.prepare("SELECT name, muted_until FROM projects WHERE id = ?").bind(m.project_id).first<{ name: string; muted_until: number }>();
   const out = await checkAndRecord(env, { ...m, project_name: p?.name ?? "", project_muted_until: p?.muted_until });
-  if (out.alert) await deliver([out.alert], await channelsByProject(env, m.project_id), env.APP_URL);
+  if (out.alert) await deliver([out.alert], await channelsByProject(env, m.project_id), (await withAppUrl(env)).APP_URL);
   return out.result;
 }
 
@@ -479,7 +479,7 @@ route("POST", "/monitors/:id/ack", async (c) => {
   ]);
   // Tell the channel, so the rest of the team knows someone is on it.
   c.exec.waitUntil(channelsByProject(c.env, m.project_id).then((ch) =>
-    sendAll(ch.get(m.project_id) ?? [], ackCard({ monitorId: m.id, project: m.project_name, monitor: m.name }, c.user, c.env.APP_URL), m.id)));
+    sendAll(ch.get(m.project_id) ?? [], ackCard({ monitorId: m.id, project: m.project_name, monitor: m.name }, c.user, c.env.APP_URL || new URL(c.req.url).origin), m.id)));
   return { acked_by: c.user, acked_at: now };
 });
 
@@ -502,6 +502,23 @@ route("POST", "/projects/:id/mute", async (c) => {
 });
 
 route("GET", "/regions", async () => REGIONS.map(([, label]) => label));
+
+// --- app URL for links in alerts ---
+
+// APP_URL if set, else the address people last opened the app at. Cron has no request to read it from.
+let knownOrigin = "";
+async function rememberOrigin(env: Env, origin: string) {
+  if (env.APP_URL || origin === knownOrigin || /\/\/(localhost|127\.)/.test(origin)) return;
+  knownOrigin = origin;
+  await env.DB.prepare("INSERT INTO meta (key, value) VALUES ('app_url', ?1) ON CONFLICT (key) DO UPDATE SET value = ?1 WHERE value != ?1")
+    .bind(origin).run();
+}
+
+async function withAppUrl(env: Env): Promise<Env> {
+  if (env.APP_URL) return env;
+  const row = await env.DB.prepare("SELECT value FROM meta WHERE key = 'app_url'").first<{ value: string }>().catch(() => null);
+  return { ...env, APP_URL: row?.value ?? "" };
+}
 
 // --- scheduler ---
 
@@ -553,7 +570,12 @@ export default {
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
     const user = await getUser(req, env);
-    if (!user) return json({ error: "Not signed in. Open this app through Cloudflare Access." }, 401);
+    if (!user) {
+      return accessConfigured(env)
+        ? json({ error: "Not signed in. Open this app through Cloudflare Access." }, 401)
+        : json({ error: "Cloudflare Access isn't set up yet.", setup: true }, 401);
+    }
+    exec.waitUntil(rememberOrigin(env, url.origin));
     // JSON-only writes: a cross-site <form> can't send application/json, which blocks CSRF.
     if ((req.method === "POST" || req.method === "PATCH") && !req.headers.get("content-type")?.includes("application/json")) {
       return json({ error: "Expected a JSON body." }, 415);
@@ -575,8 +597,9 @@ export default {
     return json({ error: "Not found." }, 404);
   },
 
-  async scheduled(event, env, exec) {
+  async scheduled(event, rawEnv, exec) {
     const now = event.scheduledTime;
+    const env = await withAppUrl(rawEnv);
     const channels = await channelsByProject(env);
     await runDue(env, now, channels);
     await remind(env, now, channels);

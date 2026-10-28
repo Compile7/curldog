@@ -1,3 +1,0 @@
-# Local dev only. Skips Cloudflare Access and acts as this user.
-# Never set DEV_USER in production.
-DEV_USER=you@company.com

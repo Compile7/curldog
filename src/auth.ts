@@ -4,8 +4,15 @@
 export interface AuthEnv {
   ACCESS_TEAM_DOMAIN?: string; // e.g. "acme.cloudflareaccess.com"
   ACCESS_AUD?: string; // Application Audience (AUD) tag
-  DEV_USER?: string; // local dev only, set in .dev.vars
+  DEV_USER?: string; // optional name for the local dev user
 }
+
+// Requests can only carry a localhost host when they come from `wrangler dev` on your machine.
+const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/;
+
+// Accepts "acme.cloudflareaccess.com", "https://acme.cloudflareaccess.com", or the full certs URL.
+export const teamDomain = (env: AuthEnv) => env.ACCESS_TEAM_DOMAIN?.trim().replace(/^https?:\/\//, "").split("/")[0] ?? "";
+export const accessConfigured = (env: AuthEnv) => Boolean(teamDomain(env) && env.ACCESS_AUD?.trim());
 
 type Jwk = JsonWebKey & { kid: string };
 let keyCache: { domain: string; at: number; keys: Jwk[] } | null = null;
@@ -24,10 +31,11 @@ async function getKeys(domain: string): Promise<Jwk[]> {
 }
 
 export async function getUser(req: Request, env: AuthEnv): Promise<string | null> {
-  if (env.DEV_USER) return env.DEV_USER;
+  if (LOCAL.test(new URL(req.url).hostname)) return env.DEV_USER || "dev@localhost";
   const token = req.headers.get("cf-access-jwt-assertion");
-  const domain = env.ACCESS_TEAM_DOMAIN;
-  if (!token || !domain || !env.ACCESS_AUD) return null;
+  const domain = teamDomain(env);
+  const audience = env.ACCESS_AUD?.trim();
+  if (!token || !domain || !audience) return null;
   try {
     const [h, p, sig] = token.split(".");
     const header = decodeJson(h);
@@ -39,7 +47,7 @@ export async function getUser(req: Request, env: AuthEnv): Promise<string | null
     if (!valid) return null;
     const claims = decodeJson(p);
     const aud: string[] = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-    if (!aud.includes(env.ACCESS_AUD)) return null;
+    if (!aud.includes(audience)) return null;
     if (claims.iss !== `https://${domain}`) return null;
     if (typeof claims.exp !== "number" || claims.exp * 1000 < Date.now()) return null;
     return claims.email ?? claims.common_name ?? null;
