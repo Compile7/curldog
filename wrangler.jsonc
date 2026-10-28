@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "moniwork",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/hb/*"]
+  },
+  // Every minute: run due monitors and reminders. Hourly: prune, expiry checks, Monday weekly report.
+  "triggers": { "crons": ["* * * * *"] },
+  // Workers AI: a short explanation when a monitor goes down (once per incident).
+  "ai": { "binding": "AI" },
+  // One Durable Object per region runs checks for monitors with "check from 3 regions" on.
+  "durable_objects": { "bindings": [{ "name": "PROBER", "class_name": "Prober" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Prober"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "moniwork",
+      // Replace with the id printed by `npx wrangler d1 create moniwork`
+      "database_id": "447b920c-65d7-4f0e-8da3-f54cbcfaeae4",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Cloudflare Access: every /api request must carry a valid Access JWT.
+  "vars": {
+    // Public URL of the app, e.g. "https://moniwork.example.com". Adds "Open in Moniwork" links to alerts.
+    "APP_URL": "https://moniwork.gracker-account.workers.dev",
+    "ACCESS_TEAM_DOMAIN": "c7-dev.cloudflareaccess.com",
+    "ACCESS_AUD": "578984d8b36f6f82a98dae87fe4f4d52073fac18d6886cda40fdb0a665414ba6"
+  },
+  "observability": { "enabled": true }
+}

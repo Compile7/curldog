@@ -1,0 +1,15 @@
+{
+  "name": "moniwork",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply moniwork --local && wrangler dev --local --test-scheduled",
+    "deploy": "wrangler d1 migrations apply moniwork --remote && wrangler deploy",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "check": "tsc --noEmit && npm test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "wrangler": "^4.154.0"
+  }
+}
