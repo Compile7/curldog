@@ -26,7 +26,7 @@ This applies in every project space: issues, pull requests, discussions, and any
 
 ## Reporting
 
-Report problems privately to the maintainers through [a private security advisory](https://github.com/GovindMalviya/moniwork/security/advisories/new) (it reaches maintainers only) or by contacting the maintainer through their GitHub profile. Every report is reviewed and kept confidential.
+Report problems privately to the maintainers through [a private security advisory](https://github.com/Compile7/moniwork/security/advisories/new) (it reaches maintainers only) or by contacting the maintainer through their GitHub profile. Every report is reviewed and kept confidential.
 
 ## Enforcement
 

@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for reporting! Please **remove API keys, tokens and webhook URLs** from anything you paste.
-        Found a security problem? Don't file it here. See [SECURITY.md](https://github.com/GovindMalviya/moniwork/blob/master/SECURITY.md).
+        Found a security problem? Don't file it here. See [SECURITY.md](https://github.com/Compile7/moniwork/blob/master/SECURITY.md).
   - type: textarea
     id: what
     attributes:

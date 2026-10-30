@@ -5,9 +5,9 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "repository": { "type": "git", "url": "git+https://github.com/GovindMalviya/moniwork.git" },
-  "homepage": "https://github.com/GovindMalviya/moniwork#readme",
-  "bugs": "https://github.com/GovindMalviya/moniwork/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/Compile7/moniwork.git" },
+  "homepage": "https://github.com/Compile7/moniwork#readme",
+  "bugs": "https://github.com/Compile7/moniwork/issues",
   "keywords": ["uptime", "monitoring", "status", "cloudflare-workers", "d1", "curl", "uptime-kuma", "heartbeat", "alerts"],
   "scripts": {
     "dev": "wrangler d1 migrations apply moniwork --local && wrangler dev --local --test-scheduled",
@@ -26,7 +26,7 @@
     "label": "Moniwork",
     "products": ["Workers", "D1", "Durable Objects", "Workers AI"],
     "categories": ["monitoring"],
-    "docs_url": "https://github.com/GovindMalviya/moniwork#readme",
+    "docs_url": "https://github.com/Compile7/moniwork#readme",
     "bindings": {
       "DB": { "description": "Monitors, check history, incidents and notification channels." },
       "AI": { "description": "Writes a one-line explanation when a monitor goes down. Runs once per incident." },

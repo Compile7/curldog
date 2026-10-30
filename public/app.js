@@ -308,7 +308,7 @@ function setupView() {
         <li><b>Reload this page.</b> You'll sign in through Access and land on an empty dashboard.</li>
       </ol>
       <p class="hint">Using heartbeat monitors? Also add an Access application for the <code>/hb</code> path with a <b>Bypass</b> policy, so your servers can ping without signing in.</p>
-      <a class="btn primary" href="https://github.com/GovindMalviya/moniwork#2-lock-it-down-with-cloudflare-access" target="_blank" rel="noopener">Setup guide</a>
+      <a class="btn primary" href="https://github.com/Compile7/moniwork#2-lock-it-down-with-cloudflare-access" target="_blank" rel="noopener">Setup guide</a>
     </div>`;
 }
 

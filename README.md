@@ -9,9 +9,9 @@
 Self-hosted uptime monitoring for teams, running entirely on your own Cloudflare account.<br>
 No servers, no containers, no database to babysit.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/GovindMalviya/moniwork)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/moniwork)
 
-[![CI](https://github.com/GovindMalviya/moniwork/actions/workflows/ci.yml/badge.svg)](https://github.com/GovindMalviya/moniwork/actions/workflows/ci.yml)
+[![CI](https://github.com/Compile7/moniwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Compile7/moniwork/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-2563eb.svg)](CONTRIBUTING.md)
 ![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020?logo=cloudflare&logoColor=white)
@@ -108,7 +108,7 @@ It all runs on your own Cloudflare account, behind your own login. Your API keys
 
 ### 1. Click the button
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/GovindMalviya/moniwork)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/moniwork)
 
 Cloudflare copies this repo to your GitHub account, creates the D1 database, applies the schema, and deploys. Every push to your copy redeploys it.
 
@@ -116,7 +116,7 @@ Cloudflare copies this repo to your GitHub account, creates the D1 database, app
 <summary><b>Prefer the command line?</b></summary>
 
 ```sh
-git clone https://github.com/GovindMalviya/moniwork.git
+git clone https://github.com/Compile7/moniwork.git
 cd moniwork
 npm install
 npx wrangler login
@@ -276,7 +276,7 @@ Local dev runs with `--local`, so AI summaries are skipped (Workers AI only runs
 - [ ] TCP and DNS monitors
 - [ ] Queue-based fan-out for very large installs
 
-Have an idea? [Open a feature request](https://github.com/GovindMalviya/moniwork/issues/new?template=feature_request.yml).
+Have an idea? [Open a feature request](https://github.com/Compile7/moniwork/issues/new?template=feature_request.yml).
 
 ## 🤝 Contributing
 

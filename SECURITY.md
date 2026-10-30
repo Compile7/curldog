@@ -6,7 +6,7 @@ Moniwork stores curl commands that often carry API keys, plus webhook URLs and b
 
 **Please don't open a public issue.** Report it privately:
 
-1. Go to [Security → Report a vulnerability](https://github.com/GovindMalviya/moniwork/security/advisories/new).
+1. Go to [Security → Report a vulnerability](https://github.com/Compile7/moniwork/security/advisories/new).
 2. Describe the problem, how to reproduce it, and what an attacker could do.
 
 You'll get a reply within 3 working days. We'll keep you updated, credit you in the release notes if you want, and publish an advisory once a fix ships.
