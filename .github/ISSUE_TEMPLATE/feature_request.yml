@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for Moniwork.
+description: Suggest an idea for CurlDog.
 labels: [enhancement]
 body:
   - type: textarea

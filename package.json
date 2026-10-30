@@ -1,18 +1,18 @@
 {
-  "name": "moniwork",
+  "name": "curldog",
   "version": "1.0.0",
   "description": "Self-hosted HTTP monitoring on Cloudflare Workers. Paste a curl, get alerts in Google Chat, Telegram, Slack or Discord.",
   "license": "MIT",
   "private": true,
   "type": "module",
-  "repository": { "type": "git", "url": "git+https://github.com/Compile7/moniwork.git" },
-  "homepage": "https://github.com/Compile7/moniwork#readme",
-  "bugs": "https://github.com/Compile7/moniwork/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/Compile7/curldog.git" },
+  "homepage": "https://github.com/Compile7/curldog#readme",
+  "bugs": "https://github.com/Compile7/curldog/issues",
   "keywords": ["uptime", "monitoring", "status", "cloudflare-workers", "d1", "curl", "uptime-kuma", "heartbeat", "alerts"],
   "scripts": {
-    "dev": "wrangler d1 migrations apply moniwork --local && wrangler dev --local --test-scheduled",
-    "deploy": "(wrangler d1 migrations apply moniwork --remote || true) && wrangler deploy && wrangler d1 migrations apply moniwork --remote",
-    "seed": "node scripts/seed.mjs > .wrangler/seed.sql && wrangler d1 execute moniwork --local --file .wrangler/seed.sql",
+    "dev": "wrangler d1 migrations apply curldog --local && wrangler dev --local --test-scheduled",
+    "deploy": "(wrangler d1 migrations apply curldog --remote || true) && wrangler deploy && wrangler d1 migrations apply curldog --remote",
+    "seed": "node scripts/seed.mjs > .wrangler/seed.sql && wrangler d1 execute curldog --local --file .wrangler/seed.sql",
     "types": "wrangler types --include-env=false",
     "test": "node --test \"src/**/*.test.ts\"",
     "check": "tsc --noEmit && npm test"
@@ -23,10 +23,10 @@
     "wrangler": "^4.154.0"
   },
   "cloudflare": {
-    "label": "Moniwork",
+    "label": "CurlDog",
     "products": ["Workers", "D1", "Durable Objects", "Workers AI"],
     "categories": ["monitoring"],
-    "docs_url": "https://github.com/Compile7/moniwork#readme",
+    "docs_url": "https://github.com/Compile7/curldog#readme",
     "bindings": {
       "DB": { "description": "Monitors, check history, incidents and notification channels." },
       "AI": { "description": "Writes a one-line explanation when a monitor goes down. Runs once per incident." },

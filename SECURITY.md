@@ -1,12 +1,12 @@
 # Security Policy
 
-Moniwork stores curl commands that often carry API keys, plus webhook URLs and bot tokens. We take security reports seriously.
+CurlDog stores curl commands that often carry API keys, plus webhook URLs and bot tokens. We take security reports seriously.
 
 ## Reporting a vulnerability
 
 **Please don't open a public issue.** Report it privately:
 
-1. Go to [Security → Report a vulnerability](https://github.com/Compile7/moniwork/security/advisories/new).
+1. Go to [Security → Report a vulnerability](https://github.com/Compile7/curldog/security/advisories/new).
 2. Describe the problem, how to reproduce it, and what an attacker could do.
 
 You'll get a reply within 3 working days. We'll keep you updated, credit you in the release notes if you want, and publish an advisory once a fix ships.
@@ -15,7 +15,7 @@ You'll get a reply within 3 working days. We'll keep you updated, credit you in 
 
 Only the latest release on `master` gets security fixes.
 
-## How Moniwork is protected
+## How CurlDog is protected
 
 These are the security boundaries. Anything that gets around one of them is a vulnerability.
 

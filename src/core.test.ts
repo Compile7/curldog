@@ -193,7 +193,7 @@ test("builds alert messages per channel type", () => {
   assert.ok((text.body as { text: string }).text.startsWith("*🟢 Pay <API> / Checkout is back UP after 13m*"));
 
   const wh = buildRequest({ type: "webhook", config: JSON.stringify({ url: "https://hooks.slack.com/x" }) }, testCard());
-  assert.ok((wh.body as { content: string }).content.includes("**✅ Moniwork test**"));
+  assert.ok((wh.body as { content: string }).content.includes("**✅ CurlDog test**"));
 
   const g = groupCard([down, { ...down, monitor: "Refunds", error: "Timed out after 10s" }, { ...up, monitor: "Login" }], app);
   assert.equal(g.title, "🔴 Pay <API>: 2 DOWN, 1 back up");

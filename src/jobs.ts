@@ -92,7 +92,7 @@ export async function weeklyReport(env: JobEnv, now: number) {
         return [`${p!.uptime >= 0.999 ? "🟢" : p!.uptime >= 0.99 ? "🟡" : "🔴"} ${p!.name}: ${pct(p!.uptime)} uptime`,
           `${inc.get(p!.id) ?? 0} incidents`, s ? `slowest ${s.name} (${ms(s.avg)})` : ""].filter(Boolean).join(" · ");
       }),
-      buttons: app ? [{ label: "Open Moniwork", url: app }] : [],
+      buttons: app ? [{ label: "Open CurlDog", url: app }] : [],
     };
     return sendAll([channel], card, "weekly report");
   }));

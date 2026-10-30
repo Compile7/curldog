@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "moniwork",
+  "name": "curldog",
   "main": "src/index.ts",
   "compatibility_date": "2025-10-01",
   "assets": {
@@ -17,7 +17,7 @@
   "durable_objects": { "bindings": [{ "name": "PROBER", "class_name": "Prober" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Prober"] }],
   // No database_id: Wrangler creates the database on first deploy and reuses it after.
-  "d1_databases": [{ "binding": "DB", "database_name": "moniwork", "migrations_dir": "migrations" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "curldog", "migrations_dir": "migrations" }],
   // Settings live in the dashboard (Worker → Settings → Variables and Secrets), not in this file:
   //   ACCESS_TEAM_DOMAIN  e.g. "acme.cloudflareaccess.com"  (required)
   //   ACCESS_AUD          Access application audience tag    (required)

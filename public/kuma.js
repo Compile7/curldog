@@ -1,11 +1,11 @@
-// Converts an Uptime Kuma backup (Settings → Backup → Export) into Moniwork monitors.
+// Converts an Uptime Kuma backup (Settings → Backup → Export) into CurlDog monitors.
 
 const INTERVALS = [60, 300, 600, 900, 1800, 3600];
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const nearest = (sec) => INTERVALS.reduce((best, v) => (Math.abs(v - sec) < Math.abs(best - sec) ? v : best));
 const CONTENT_TYPES = { json: "application/json", xml: "text/xml", form: "application/x-www-form-urlencoded" };
 
-// Kuma notification config → Moniwork channel. Types we can't send to are left out.
+// Kuma notification config → CurlDog channel. Types we can't send to are left out.
 const CHANNELS = {
   GoogleChat: (c) => ({ type: "google_chat", config: { url: c.googleChatWebhookURL } }),
   telegram: (c) => ({ type: "telegram", config: { token: c.telegramBotToken, chat_id: String(c.telegramChatID ?? "") } }),

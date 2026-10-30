@@ -1,14 +1,14 @@
-# Contributing to Moniwork
+# Contributing to CurlDog
 
-Thanks for helping. Moniwork is small on purpose, and this guide keeps it that way.
+Thanks for helping. CurlDog is small on purpose, and this guide keeps it that way.
 
 ## Quick start
 
 You need Node.js 22.18 or newer. You don't need a Cloudflare account for local work.
 
 ```sh
-git clone https://github.com/Compile7/moniwork.git
-cd moniwork
+git clone https://github.com/Compile7/curldog.git
+cd curldog
 npm install
 npm run dev
 ```
@@ -72,7 +72,7 @@ These keep the project easy to run and easy to read.
 - More Uptime Kuma monitor types in `public/kuma.js`.
 - Translating the UI.
 
-Look for issues labelled [`good first issue`](https://github.com/Compile7/moniwork/labels/good%20first%20issue).
+Look for issues labelled [`good first issue`](https://github.com/Compile7/curldog/labels/good%20first%20issue).
 
 ## Commit messages
 
@@ -80,7 +80,7 @@ Use the imperative and keep the first line short: `Add Teams channel`, `Fix redi
 
 ## Reporting bugs and security issues
 
-- Bugs and ideas: [open an issue](https://github.com/Compile7/moniwork/issues/new/choose).
+- Bugs and ideas: [open an issue](https://github.com/Compile7/curldog/issues/new/choose).
 - Security problems: **don't open a public issue.** See [SECURITY.md](SECURITY.md).
 
 By contributing, you agree your work is released under the [MIT License](LICENSE), and you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

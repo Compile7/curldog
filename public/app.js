@@ -1,4 +1,4 @@
-// Moniwork UI. No framework, no build step.
+// CurlDog UI. No framework, no build step.
 import { convertKuma, groupByDomain } from "./kuma.js";
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -166,7 +166,7 @@ function restore({ id, sel, open }) {
 function sidebar() {
   const pid = state.page.projectId;
   return html`
-    <div class="side-head"><a href="/" class="brand"><span class="logo"></span>Moniwork</a></div>
+    <div class="side-head"><a href="/" class="brand"><span class="logo"></span>CurlDog</a></div>
     <nav class="side-nav">
       <a href="/" class="nav-item ${location.pathname === "/" ? "active" : ""}">${icon("grid")}Overview</a>
       <a href="/notifications" class="nav-item ${location.pathname === "/notifications" ? "active" : ""}">${icon("bell")}Notifications</a>
@@ -298,17 +298,17 @@ function setupView() {
   return html`
     <div class="welcome empty setup">
       <div class="glyph">${icon("check")}</div>
-      <h1>Moniwork is deployed</h1>
+      <h1>CurlDog is deployed</h1>
       <p>One step left: put it behind Cloudflare Access so only your team can sign in. Until then, the API stays locked.</p>
       <ol class="setup-steps">
-        <li><b>Turn on Access.</b> In the Cloudflare dashboard, open <b>Workers & Pages → moniwork → Settings → Domains & Routes</b>. Next to your workers.dev URL, choose <b>Enable Cloudflare Access</b>. Using a custom domain? Add a self-hosted Access application for it instead.</li>
+        <li><b>Turn on Access.</b> In the Cloudflare dashboard, open <b>Workers & Pages → curldog → Settings → Domains & Routes</b>. Next to your workers.dev URL, choose <b>Enable Cloudflare Access</b>. Using a custom domain? Add a self-hosted Access application for it instead.</li>
         <li><b>Choose who gets in.</b> Click <b>Manage Cloudflare Access</b> and edit the policy, for example: emails ending in <code>@yourcompany.com</code>.</li>
         <li><b>Copy two values</b> from that Access application: the <b>Application Audience (AUD) tag</b> and your <b>team domain</b> (like <code>acme.cloudflareaccess.com</code>).</li>
         <li><b>Add them to the Worker.</b> <b>Settings → Variables and Secrets → Add</b>: <code>ACCESS_TEAM_DOMAIN</code> and <code>ACCESS_AUD</code>. Saving redeploys automatically.</li>
         <li><b>Reload this page.</b> You'll sign in through Access and land on an empty dashboard.</li>
       </ol>
       <p class="hint">Using heartbeat monitors? Also add an Access application for the <code>/hb</code> path with a <b>Bypass</b> policy, so your servers can ping without signing in.</p>
-      <a class="btn primary" href="https://github.com/Compile7/moniwork#2-lock-it-down-with-cloudflare-access" target="_blank" rel="noopener">Setup guide</a>
+      <a class="btn primary" href="https://github.com/Compile7/curldog#2-lock-it-down-with-cloudflare-access" target="_blank" rel="noopener">Setup guide</a>
     </div>`;
 }
 
@@ -316,7 +316,7 @@ function welcome() {
   return html`
     <div class="welcome empty">
       <div class="glyph">${icon("pulse")}</div>
-      <h1>Welcome to Moniwork</h1>
+      <h1>Welcome to CurlDog</h1>
       <p>Watch your team's HTTP endpoints. Paste a curl command, pick how often to check it, and see when it breaks.</p>
       <div class="steps">
         <div class="step"><b>1</b>Create a project for a service or team</div>

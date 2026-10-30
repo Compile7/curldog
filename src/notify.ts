@@ -114,7 +114,7 @@ export function ackCard(a: Pick<Alert, "monitorId" | "project" | "monitor">, by:
   return { title: `👀 ${by} is on ${a.project} / ${a.monitor}`, lines: ["Acknowledged. Reminders are stopped for this incident."], buttons: links(app, a, ["open"]) };
 }
 
-export const testCard = (): Card => ({ title: "✅ Moniwork test", lines: ["This channel will get alerts when monitors go down or recover."], buttons: [] });
+export const testCard = (): Card => ({ title: "✅ CurlDog test", lines: ["This channel will get alerts when monitors go down or recover."], buttons: [] });
 
 // --- rendering per channel type ---
 
@@ -128,7 +128,7 @@ function googleChat(card: Card) {
   const text = card.lines.map((l) => (typeof l === "string" ? escHtml(l) : `<font color="#80868b">${escHtml(l.code)}</font>`)).join("<br>");
   const widgets: unknown[] = [{ textParagraph: { text } }];
   if (card.buttons.length) widgets.push({ buttonList: { buttons: card.buttons.map((b) => ({ text: b.label, onClick: { openLink: { url: b.url } } })) } });
-  return { cardsV2: [{ cardId: "moniwork", card: { header: { title: card.title }, sections: [{ widgets }] } }] };
+  return { cardsV2: [{ cardId: "curldog", card: { header: { title: card.title }, sections: [{ widgets }] } }] };
 }
 
 // Plain text: Google Chat fallback, Slack (*bold*, <url|label>) and Discord (`content`, **bold**).

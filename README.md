@@ -1,48 +1,62 @@
 <div align="center">
 
-<img src="docs/logo.svg" width="72" height="72" alt="Moniwork logo">
+<img src="docs/banner.svg" alt="CurlDog: Paste a curl. CurlDog barks when it breaks." width="100%">
 
-# Moniwork
+<h1>CurlDog</h1>
 
-**Paste a curl. Get told when it breaks, and why.**
+**Paste a curl. CurlDog barks when it breaks, and tells you why.**
 
 Self-hosted uptime monitoring for teams, running entirely on your own Cloudflare account.<br>
-No servers, no containers, no database to babysit.
+No servers, no containers, no database to babysit. Just a very loyal dog.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/moniwork)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/curldog)
 
-[![CI](https://github.com/Compile7/moniwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Compile7/moniwork/actions/workflows/ci.yml)
+[![CI](https://github.com/Compile7/curldog/actions/workflows/ci.yml/badge.svg)](https://github.com/Compile7/curldog/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-2563eb.svg)](CONTRIBUTING.md)
 ![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020?logo=cloudflare&logoColor=white)
 
-<sub>Sponsored by <a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=header"><b>SSOJet</b></a>: enterprise SSO for B2B SaaS</sub>
+<sub>Sponsored by <a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=curldog&utm_content=header"><b>SSOJet</b></a>: enterprise SSO for B2B SaaS</sub>
 
 [Deploy](#-deploy-in-5-minutes) · [Features](#-features) · [How it works](#-how-it-works) · [Local dev](#-local-development) · [Contributing](CONTRIBUTING.md)
 
 <br>
 
-<img src="docs/screenshots/overview.png" alt="Moniwork overview: one monitor down, project health, recent incidents" width="100%">
+<img src="docs/screenshots/overview.png" alt="CurlDog overview: one monitor down, project health, recent incidents" width="100%">
 
 <br><br>
 
-<a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=banner"><img src="docs/sponsors/ssojet-banner.svg" alt="Sponsored by SSOJet: Enterprise SSO your security team will approve. Add enterprise SSO to your B2B SaaS in days, not months." width="100%"></a>
+<a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=curldog&utm_content=banner"><img src="docs/sponsors/ssojet-banner.svg" alt="Sponsored by SSOJet: Enterprise SSO your security team will approve. Add enterprise SSO to your B2B SaaS in days, not months." width="100%"></a>
 
 </div>
 
 ---
 
-## Why Moniwork
+## Why CurlDog
 
 Most uptime tools make you rebuild your request in their form. Then, when something fails, they tell you *that* it failed, but not *why*.
 
-Moniwork starts from the request you already have:
+CurlDog starts from the request you already have:
 
 1. **Copy as cURL** from your browser or terminal, and paste it in. Headers, auth, body and redirects all come along.
 2. Pick how often to check it.
 3. When it breaks, Google Chat or Telegram gets a message with the status, the response, **an AI explanation of the likely cause**, and buttons to **Acknowledge** or **Mute** it.
 
 It all runs on your own Cloudflare account, behind your own login. Your API keys never leave infrastructure you control.
+
+## 🐩 Meet Curly
+
+<img src="docs/logo.svg" width="96" height="96" align="right" alt="Curly, the CurlDog mascot">
+
+Curly is an apricot poodle with one job: watch your endpoints and bark the moment one breaks.
+
+- **Sniffs** every curl on schedule, from up to 3 regions.
+- **Barks** in Google Chat, Telegram or Slack, with Acknowledge and Mute buttons.
+- **Fetches** the evidence: DNS, the redirect chain, and a diff against the last good response.
+- **Keeps barking** with reminders, and fetches a teammate if nobody comes.
+- **Sits quietly** when you mute a monitor for planned work.
+
+<img src="docs/palette.svg" alt="The curly coat palette: Cream, Biscuit, Apricot, Caramel and Cocoa" width="100%">
 
 ## ✨ Features
 
@@ -114,7 +128,7 @@ It all runs on your own Cloudflare account, behind your own login. Your API keys
 
 ### 1. Click the button
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/moniwork)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Compile7/curldog)
 
 Cloudflare copies this repo to your GitHub account, creates the D1 database, applies the schema, and deploys. Every push to your copy redeploys it.
 
@@ -122,8 +136,8 @@ Cloudflare copies this repo to your GitHub account, creates the D1 database, app
 <summary><b>Prefer the command line?</b></summary>
 
 ```sh
-git clone https://github.com/Compile7/moniwork.git
-cd moniwork
+git clone https://github.com/Compile7/curldog.git
+cd curldog
 npm install
 npx wrangler login
 npm run deploy
@@ -134,9 +148,9 @@ npm run deploy
 
 ### 2. Lock it down with Cloudflare Access
 
-Open your new Worker's URL. You'll see a setup page, because **Moniwork refuses every API request until Cloudflare Access protects it.** Nothing is exposed while you set it up.
+Open your new Worker's URL. You'll see a setup page, because **CurlDog refuses every API request until Cloudflare Access protects it.** Nothing is exposed while you set it up.
 
-1. In the Cloudflare dashboard: **Workers & Pages → moniwork → Settings → Domains & Routes**. Next to your `workers.dev` URL, choose **Enable Cloudflare Access**. (On a custom domain, add a self-hosted Access application for it instead.)
+1. In the Cloudflare dashboard: **Workers & Pages → curldog → Settings → Domains & Routes**. Next to your `workers.dev` URL, choose **Enable Cloudflare Access**. (On a custom domain, add a self-hosted Access application for it instead.)
 2. **Manage Cloudflare Access →** edit the policy to allow your team, for example emails ending in `@yourcompany.com`.
 3. From that Access application, copy the **Application Audience (AUD) tag** and your **team domain** (like `acme.cloudflareaccess.com`).
 4. **Settings → Variables and Secrets → Add:**
@@ -145,7 +159,7 @@ Open your new Worker's URL. You'll see a setup page, because **Moniwork refuses 
    |---|---|
    | `ACCESS_TEAM_DOMAIN` | `acme.cloudflareaccess.com` |
    | `ACCESS_AUD` | your AUD tag |
-   | `APP_URL` *(optional)* | e.g. `https://status.acme.com`. Links in alerts use it. Without it, Moniwork uses the address you open it at. |
+   | `APP_URL` *(optional)* | e.g. `https://status.acme.com`. Links in alerts use it. Without it, CurlDog uses the address you open it at. |
 
 5. Reload. You'll sign in through Access and land on an empty dashboard.
 
@@ -191,7 +205,7 @@ Variables can come from the JSON body (`$.data.items[0].id`) or a header (`heade
 Create a monitor, choose **Heartbeat**, and pick how often the job runs. Add the ping URL to the end of the job:
 
 ```sh
-0 2 * * * /usr/local/bin/backup.sh && curl -fsS -m 10 --retry 3 https://moniwork.example.com/hb/3f9c…
+0 2 * * * /usr/local/bin/backup.sh && curl -fsS -m 10 --retry 3 https://curldog.example.com/hb/3f9c…
 ```
 
 If no ping arrives within the interval plus half an interval of grace (at least a minute), the monitor goes down.
@@ -200,7 +214,7 @@ If no ping arrives within the interval plus half an interval of grace (at least 
 <details>
 <summary><b>Import from Uptime Kuma</b></summary>
 
-In Uptime Kuma: **Settings → Backup → Export**. In Moniwork, click **Import** and drop the JSON file.
+In Uptime Kuma: **Settings → Backup → Export**. In CurlDog, click **Import** and drop the JSON file.
 
 - HTTP and keyword monitors come over, with headers, body, basic auth, status codes and intervals.
 - **One project per site**, named after the brand ("api.ssojet.com" and "ssojet.com" both go into *SSOJet*).
@@ -282,7 +296,7 @@ Local dev runs with `--local`, so AI summaries are skipped (Workers AI only runs
 - [ ] TCP and DNS monitors
 - [ ] Queue-based fan-out for very large installs
 
-Have an idea? [Open a feature request](https://github.com/Compile7/moniwork/issues/new?template=feature_request.yml).
+Have an idea? [Open a feature request](https://github.com/Compile7/curldog/issues/new?template=feature_request.yml).
 
 ## 🤝 Contributing
 
@@ -292,7 +306,7 @@ Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security issue?
 
 ## 💜 Sponsor
 
-Moniwork is sponsored by **[SSOJet](https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=sponsor-section)**. SSOJet adds enterprise SSO to your B2B SaaS in days, not months. Connect 100+ identity providers over SAML, OIDC and SCIM without rebuilding your auth.
+CurlDog is sponsored by **[SSOJet](https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=curldog&utm_content=sponsor-section)**. SSOJet adds enterprise SSO to your B2B SaaS in days, not months. Connect 100+ identity providers over SAML, OIDC and SCIM without rebuilding your auth.
 
 ## 📄 License
 
