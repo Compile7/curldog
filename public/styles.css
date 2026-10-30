@@ -505,7 +505,11 @@ select.input { padding-right: 8px; cursor: pointer; }
 .ch-icon.sms { background: #e8445a; }
 .maint-line { color: #4a7fd4; }
 .status-slug { align-items: center; }
-.status-slug[hidden] { display: none; }
+.status-opts[hidden] { display: none; }
+.incident-line { color: var(--warn); }
+.incident-line.major { color: var(--down); }
+.update-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.update-list p { margin: 2px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
 .status-slug .prefix { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
 .ch-row .btn { flex: none; }
 .type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
@@ -690,3 +694,4 @@ details.advanced > summary em { font-style: normal; font-weight: 400; margin-lef
 .setup .hint { text-align: left; }
 
 .setup .hint { max-width: none; }
+.modal-body .status-opts { gap: 10px; }

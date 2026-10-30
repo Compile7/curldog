@@ -20,6 +20,8 @@ export interface MonitorRow {
   slow_since: number | null;
   slow: number;
   paused: number;
+  on_status: number;
+  public_name: string;
   muted_until: number;
   status: "pending" | "up" | "down";
   last_checked_at: number | null;

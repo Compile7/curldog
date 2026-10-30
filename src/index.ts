@@ -3,7 +3,7 @@ import { checkAndRecord, REGIONS, runCheck, validExpected, type MonitorRow, type
 import { accessConfigured, getUser, type AuthEnv } from "./auth.ts";
 import { ackCard, deliver, send, sendAll, testCard, telegramChats, type Channel, type ChannelType } from "./notify.ts";
 import { inMaintenance, occurrence, refreshExpiry, registrable, remind, weeklyReport, type Window } from "./jobs.ts";
-import { loadStatus, renderStatus } from "./status.ts";
+import { badge, incidentsSql, loadStatus, parseIncidents, renderFeed, renderStatus, statusJson } from "./status.ts";
 import type { Prober } from "./prober.ts";
 
 export { Prober } from "./prober.ts";
@@ -176,9 +176,12 @@ function monitorFields(b: Body, prev?: MonitorRow) {
   const interval_sec = Number(b.interval_sec ?? prev?.interval_sec ?? 300);
   if (!INTERVALS.includes(interval_sec)) bad("Pick a valid check interval.");
   const paused = b.paused === undefined ? (prev?.paused ?? 0) : b.paused ? 1 : 0;
+  const on_status = b.on_status === undefined ? (prev?.on_status ?? 1) : b.on_status ? 1 : 0;
+  const public_name = String(b.public_name ?? prev?.public_name ?? "").trim().slice(0, 100);
+  const shared = { name, interval_sec, paused, on_status, public_name };
   if (type === "heartbeat") {
-    return { type, name, curl: "", request: HEARTBEAT_REQUEST, steps: "[]", regions: 0, slow_ms: 0, interval_sec,
-      timeout_ms: 10_000, expected_status: "200-399", keyword: "", paused };
+    return { type, ...shared, curl: "", request: HEARTBEAT_REQUEST, steps: "[]", regions: 0, slow_ms: 0,
+      timeout_ms: 10_000, expected_status: "200-399", keyword: "" };
   }
   const curl = String(b.curl ?? prev?.curl ?? "").trim();
   if (!curl) bad("Paste a curl command.");
@@ -193,7 +196,7 @@ function monitorFields(b: Body, prev?: MonitorRow) {
   const expected_status = String(b.expected_status ?? prev?.expected_status ?? "").trim() || "200-399";
   if (!validExpected(expected_status)) bad('Expected status must look like "200", "2xx", "200-299" or "200,204".');
   const keyword = String(b.keyword ?? prev?.keyword ?? "").slice(0, 500);
-  return { type, name, curl, request: JSON.stringify(request), steps, regions, slow_ms, interval_sec, timeout_ms, expected_status, keyword, paused };
+  return { type, ...shared, curl, request: JSON.stringify(request), steps, regions, slow_ms, timeout_ms, expected_status, keyword };
 }
 
 const publicMonitor = ({ last_ok: _, ...m }: MonitorRow) => ({ ...m, request: JSON.parse(m.request), steps: JSON.parse(m.steps) });
@@ -279,9 +282,9 @@ const withOccurrence = (w: Window, now: number) => {
 route("GET", "/projects/:id", async (c) => {
   const project = await getProject(c.env, c.params.id);
   const since = Date.now() - DAY;
-  const [monitors, spark, uptime, channels, windows] = await c.env.DB.batch([
+  const [monitors, spark, uptime, channels, windows, incidents] = await c.env.DB.batch([
     c.env.DB.prepare(`
-      SELECT id, type, name, request, token, interval_sec, paused, status, slow, muted_until, acked_by, last_checked_at, last_latency_ms, last_error
+      SELECT id, type, name, request, token, interval_sec, paused, on_status, status, slow, muted_until, acked_by, last_checked_at, last_latency_ms, last_error
       FROM monitors WHERE project_id = ? ORDER BY name COLLATE NOCASE`).bind(project.id),
     c.env.DB.prepare(`
       SELECT monitor_id, ts, ok, latency_ms FROM (
@@ -297,6 +300,7 @@ route("GET", "/projects/:id", async (c) => {
       SELECT c.id, c.name, c.type FROM project_channels pc JOIN channels c ON c.id = pc.channel_id
       WHERE pc.project_id = ? ORDER BY c.name COLLATE NOCASE`).bind(project.id),
     c.env.DB.prepare("SELECT * FROM maintenance WHERE project_id = ? ORDER BY starts_at").bind(project.id),
+    incidentsSql(c.env).bind(project.id, Date.now() - 14 * DAY),
   ]);
   const sparks = new Map<string, unknown[]>();
   for (const s of spark.results as { monitor_id: string }[]) {
@@ -308,6 +312,7 @@ route("GET", "/projects/:id", async (c) => {
     project: {
       ...project, channels: channels.results,
       maintenance: (windows.results as unknown as Window[]).map((w) => withOccurrence(w, Date.now())).filter((w) => w.next_start !== null),
+      incidents: parseIncidents(incidents.results),
     },
     monitors: (monitors.results as unknown as MonitorRow[]).map(({ request, token, ...m }) => {
       const r = JSON.parse(request);
@@ -322,9 +327,12 @@ route("PATCH", "/projects/:id", async (c) => {
   const b = await body(c);
   const f = projectFields(b, prev);
   const ids = idList(b.channel_ids);
+  const shown = idList(b.status_monitor_ids);
   await c.env.DB.batch([
     updateProject(c.env, prev.id as string, f),
     ...(ids ? linkStatements(c.env, "project", prev.id as string, ids) : []),
+    ...(shown ? [c.env.DB.prepare("UPDATE monitors SET on_status = id IN (SELECT value FROM json_each(?)) WHERE project_id = ?")
+      .bind(JSON.stringify(shown), prev.id)] : []),
   ]);
   return { ...prev, ...f };
 });
@@ -351,6 +359,56 @@ route("POST", "/projects/:id/maintenance", async (c) => {
 
 route("DELETE", "/maintenance/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM maintenance WHERE id = ?").bind(c.params.id).run();
+});
+
+// --- incidents: written updates for the status page ---
+
+const IMPACTS = ["minor", "major"];
+const INCIDENT_STATUS = ["investigating", "identified", "monitoring", "resolved"];
+
+function updateFields(b: Body) {
+  const status = String(b.status ?? "");
+  if (!INCIDENT_STATUS.includes(status)) bad("Pick a status: investigating, identified, monitoring or resolved.");
+  const message = String(b.message ?? "").trim();
+  if (!message || message.length > 2000) bad("Write a short update for your users (max 2,000 characters).");
+  const impact = b.impact === undefined ? undefined : String(b.impact);
+  if (impact !== undefined && !IMPACTS.includes(impact)) bad("Pick the impact: minor or major.");
+  return { status, message, impact };
+}
+
+const insertUpdate = (env: Env, id: string, u: { status: string; message: string }, user: string, ts: number) =>
+  env.DB.prepare("INSERT INTO incident_updates (incident_id, ts, status, message, author) VALUES (?, ?, ?, ?, ?)").bind(id, ts, u.status, u.message, user);
+
+route("POST", "/projects/:id/incidents", async (c) => {
+  const project = await getProject(c.env, c.params.id);
+  const b = await body(c);
+  const title = String(b.title ?? "").trim();
+  if (!title || title.length > 120) bad("Give the incident a title (max 120 characters).");
+  const u = updateFields({ impact: "minor", ...b });
+  const now = Date.now();
+  const id = newId();
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO incidents (id, project_id, title, impact, created_by, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, project.id, title, u.impact, c.user, now, u.status === "resolved" ? now : null),
+    insertUpdate(c.env, id, u, c.user, now),
+  ]);
+  return { id };
+});
+
+route("POST", "/incidents/:id/updates", async (c) => {
+  const inc = await c.env.DB.prepare("SELECT * FROM incidents WHERE id = ?").bind(c.params.id).first<{ id: string; impact: string; resolved_at: number | null }>();
+  if (!inc) throw new HttpError(404, "Incident not found.");
+  const u = updateFields(await body(c));
+  const now = Date.now();
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE incidents SET impact = ?, resolved_at = ? WHERE id = ?")
+      .bind(u.impact ?? inc.impact, u.status === "resolved" ? inc.resolved_at ?? now : null, inc.id),
+    insertUpdate(c.env, inc.id, u, c.user, now),
+  ]);
+});
+
+route("DELETE", "/incidents/:id", async (c) => {
+  await c.env.DB.prepare("DELETE FROM incidents WHERE id = ?").bind(c.params.id).run();
 });
 
 // --- notification channels ---
@@ -434,10 +492,10 @@ function newMonitor(env: Env, projectId: string, f: ReturnType<typeof monitorFie
   };
   const stmt = env.DB.prepare(`
     INSERT INTO monitors (id, project_id, type, name, curl, request, steps, regions, slow_ms, token, interval_sec, timeout_ms,
-      expected_status, keyword, paused, status, next_check_at, created_by, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      expected_status, keyword, paused, on_status, public_name, status, next_check_at, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(m.id, m.project_id, m.type, m.name, m.curl, m.request, m.steps, m.regions, m.slow_ms, m.token, m.interval_sec,
-      m.timeout_ms, m.expected_status, m.keyword, m.paused, m.status, m.next_check_at, m.created_by, m.created_at);
+      m.timeout_ms, m.expected_status, m.keyword, m.paused, m.on_status, m.public_name, m.status, m.next_check_at, m.created_by, m.created_at);
   return { m, stmt };
 }
 
@@ -515,9 +573,9 @@ function updateMonitor(env: Env, prev: MonitorRow, f: ReturnType<typeof monitorF
   const next_check_at = resumed || requestChanged ? 0 : prev.next_check_at;
   const stmt = env.DB.prepare(`
     UPDATE monitors SET name = ?, curl = ?, request = ?, steps = ?, regions = ?, slow_ms = ?, interval_sec = ?, timeout_ms = ?,
-      expected_status = ?, keyword = ?, paused = ?, next_check_at = ? WHERE id = ?`)
+      expected_status = ?, keyword = ?, paused = ?, on_status = ?, public_name = ?, next_check_at = ? WHERE id = ?`)
     .bind(f.name, f.curl, f.request, f.steps, f.regions, f.slow_ms, f.interval_sec, f.timeout_ms, f.expected_status, f.keyword,
-      f.paused, next_check_at, prev.id);
+      f.paused, f.on_status, f.public_name, next_check_at, prev.id);
   return { stmt, next_check_at };
 }
 
@@ -589,11 +647,12 @@ const sameName = (a: unknown, b: unknown) => String(a ?? "").trim().toLowerCase(
 const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Body;
 
 function monitorConfig(m: MonitorRow) {
-  if (m.type === "heartbeat") return { name: m.name, type: "heartbeat", interval_sec: m.interval_sec, paused: Boolean(m.paused) };
+  const status = { on_status: Boolean(m.on_status), ...(m.public_name ? { public_name: m.public_name } : {}) };
+  if (m.type === "heartbeat") return { name: m.name, type: "heartbeat", interval_sec: m.interval_sec, paused: Boolean(m.paused), ...status };
   const steps = (JSON.parse(m.steps) as Step[]).map(({ name, curl, vars }) => ({ name, curl, vars }));
   return {
     name: m.name, curl: m.curl, interval_sec: m.interval_sec, timeout_ms: m.timeout_ms, expected_status: m.expected_status,
-    keyword: m.keyword, regions: Boolean(m.regions), slow_ms: m.slow_ms, paused: Boolean(m.paused), ...(steps.length ? { steps } : {}),
+    keyword: m.keyword, regions: Boolean(m.regions), slow_ms: m.slow_ms, paused: Boolean(m.paused), ...status, ...(steps.length ? { steps } : {}),
   };
 }
 
@@ -764,16 +823,21 @@ async function ping(token: string, env: Env, exec: ExecutionContext) {
 }
 
 // Public status page: no Access login (needs a Bypass rule for /status), cached for a minute.
-async function statusPage(req: Request, slug: string, env: Env, exec: ExecutionContext) {
+async function statusPage(req: Request, slug: string, file: string, env: Env, exec: ExecutionContext) {
   const cache = caches.default;
-  const key = new URL(req.url).origin + `/status/${slug}`; // ignores ?query, so it can't be used to skip the cache
+  const base = new URL(req.url).origin + `/status/${slug}`;
+  const key = file ? `${base}/${file}` : base; // ignores ?query, so it can't be used to skip the cache
   const hit = await cache.match(key);
   if (hit) return hit;
   const now = Date.now();
   const data = await loadStatus(env.DB, slug, now);
   if (!data) return new Response("Status page not found.\n", { status: 404, headers: { "content-type": "text/plain" } });
-  const res = new Response(renderStatus(data, now), {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60", "x-robots-tag": "noindex" },
+  const [type, out] = file === "feed.atom" ? ["application/atom+xml; charset=utf-8", renderFeed(data, now, base)]
+    : file === "status.json" ? ["application/json", JSON.stringify(statusJson(data, now, base))]
+    : file === "badge.svg" ? ["image/svg+xml", badge(data, now)]
+    : ["text/html; charset=utf-8", renderStatus(data, now, base)];
+  const res = new Response(out, {
+    headers: { "content-type": type, "cache-control": "public, max-age=60", "x-robots-tag": "noindex", "access-control-allow-origin": "*" },
   });
   exec.waitUntil(cache.put(key, res.clone()));
   return res;
@@ -784,8 +848,8 @@ export default {
     const url = new URL(req.url);
     const hb = /^\/hb\/([a-f0-9]{24})\/?$/.exec(url.pathname);
     if (hb) return ping(hb[1], env, exec);
-    const st = /^\/status\/([a-z0-9-]+)\/?$/.exec(url.pathname);
-    if (st) return statusPage(req, st[1], env, exec);
+    const st = /^\/status\/([a-z0-9-]+)(?:\/(feed\.atom|status\.json|badge\.svg))?\/?$/.exec(url.pathname);
+    if (st) return statusPage(req, st[1], st[2] ?? "", env, exec);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
     const user = await getUser(req, env);
@@ -832,6 +896,7 @@ export default {
         env.DB.prepare("DELETE FROM checks WHERE ts < ?").bind(now - RETAIN_CHECKS),
         env.DB.prepare("DELETE FROM events WHERE ts < ?").bind(now - RETAIN_EVENTS),
         env.DB.prepare("DELETE FROM maintenance WHERE repeat = 'none' AND ends_at < ?").bind(now),
+        env.DB.prepare("DELETE FROM incidents WHERE resolved_at < ?").bind(now - RETAIN_EVENTS),
       ]);
       await refreshExpiry(env, now, channels);
       // Monday 04:00 UTC (09:30 in India).

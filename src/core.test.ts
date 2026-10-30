@@ -5,7 +5,7 @@ import { extract, fill, heartbeatResult, statusMatches, validExpected } from "./
 import { getUser } from "./auth.ts";
 import { ackCard, alertCard, buildRequest, duration, groupCard, pagerDuty, testCard } from "./notify.ts";
 import { occurrence, registrable } from "./jobs.ts";
-import { incidents, renderStatus } from "./status.ts";
+import { badge, incidents, renderFeed, renderStatus, statusJson } from "./status.ts";
 
 test("parses a Chrome 'Copy as cURL' command", () => {
   const r = parseCurl(`curl 'https://api.example.com/v1/items?x=1' \\
@@ -290,15 +290,50 @@ test("status page pairs incidents and never shows URLs or errors", () => {
   assert.deepEqual(incidents(ev, names), [{ name: "Web", start: 150, end: null }, { name: "API", start: 100, end: 400 }]);
 
   const now = Date.UTC(2026, 9, 30, 12);
-  const page = renderStatus({
+  const data = {
     project: { name: "Acme <API>", description: "" },
-    monitors: [{ id: "a", name: "API", status: "down" }, { id: "b", name: "Web", status: "up" }],
+    monitors: [{ id: "a", name: "API", status: "down", slow: 0 }, { id: "b", name: "Web", status: "up", slow: 0 }],
     days: [{ monitor_id: "a", day: Math.floor(now / 86_400_000), up: 0.5, n: 10 }],
     events: [{ monitor_id: "a", ts: now - 60_000, status: "down" }],
     windows: [],
-  }, now);
+    incidents: [],
+  };
+  const page = renderStatus(data, now);
   assert.ok(page.includes("<title>Acme &lt;API&gt; status</title>"));
-  assert.ok(page.includes("1 system down"));
+  assert.ok(page.includes("Partial outage"));
   assert.ok(page.includes("50.00% uptime"));
   assert.ok(page.includes("API is down"));
+});
+
+test("status page: written incidents set the banner and reach the feed, JSON and badge without authors", () => {
+  const now = Date.UTC(2026, 9, 30, 12);
+  const base = "https://x.dev/status/acme";
+  const data = {
+    project: { name: "Acme", description: "" },
+    monitors: [{ id: "a", name: "API", status: "up", slow: 1 }],
+    days: [], events: [], windows: [],
+    incidents: [
+      { id: "i1", title: "Checkout <errors>", impact: "major" as const, created_at: now - 600_000, resolved_at: null,
+        updates: [{ ts: now - 60_000, status: "identified", message: "Bad deploy, rolling back.", author: "ops@acme.dev" },
+          { ts: now - 600_000, status: "investigating", message: "Looking into it.", author: "ops@acme.dev" }] },
+      { id: "i2", title: "Slow search", impact: "minor" as const, created_at: now - 86_400_000, resolved_at: now - 80_000_000,
+        updates: [{ ts: now - 80_000_000, status: "resolved", message: "Fixed.", author: "ops@acme.dev" }] },
+    ],
+  };
+  const page = renderStatus(data, now, base);
+  assert.ok(page.includes("Major outage"), "a major incident wins over a merely slow monitor");
+  assert.ok(page.includes("Checkout &lt;errors&gt;") && page.includes("Bad deploy, rolling back.") && page.includes("Slow search"));
+  assert.ok(page.includes(">Degraded<"));
+  const json = statusJson(data, now, base);
+  assert.equal(json.status.indicator, "critical");
+  assert.deepEqual(json.components, [{ name: "API", status: "degraded_performance" }]);
+  assert.equal(json.incidents.length, 1);
+  const feed = renderFeed(data, now, base);
+  assert.equal(feed.match(/<entry>/g)?.length, 2);
+  assert.ok(badge(data, now).includes("major outage"));
+  for (const out of [page, feed, JSON.stringify(json)]) assert.ok(!out.includes("ops@acme.dev"));
+
+  const quiet = { ...data, incidents: [] };
+  assert.ok(renderStatus(quiet, now).includes("Degraded performance"));
+  assert.equal(statusJson({ ...quiet, monitors: [{ id: "a", name: "API", status: "up", slow: 0 }] }, now, base).status.indicator, "none");
 });

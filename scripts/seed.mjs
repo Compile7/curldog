@@ -7,7 +7,7 @@ const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const q = (v) => (v === null || v === undefined ? "NULL" : typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
 const insert = (table, row) => `INSERT INTO ${table} (${Object.keys(row).join(", ")}) VALUES (${Object.values(row).map(q).join(", ")});`;
 const user = "dev@localhost";
-const out = ["DELETE FROM checks;", "DELETE FROM events;", "DELETE FROM monitors;", "DELETE FROM project_channels;", "DELETE FROM channels;", "DELETE FROM projects;", "DELETE FROM expiry;", "DELETE FROM maintenance;"];
+const out = ["DELETE FROM checks;", "DELETE FROM events;", "DELETE FROM monitors;", "DELETE FROM project_channels;", "DELETE FROM channels;", "DELETE FROM projects;", "DELETE FROM expiry;", "DELETE FROM maintenance;", "DELETE FROM incidents;"];
 
 // Deterministic randomness, so screenshots look the same every time.
 let seed = 7;
@@ -32,11 +32,11 @@ for (const p of projects) {
 // base: typical latency. incidents: [hoursAgo, minutes, error]. slow: [hoursAgo, minutes] with doubled latency.
 const monitors = [
   { id: "m_home", project: "p_store", name: "Homepage", curl: "curl -L https://shop.example.com/", base: 180 },
-  { id: "m_checkout", project: "p_store", name: "Checkout API", curl: `curl -X POST https://api.shop.example.com/v2/checkout/health -H 'Authorization: Bearer sk_live_demo' --json '{"dry_run":true}'`,
+  { id: "m_checkout", project: "p_store", name: "Checkout API", public_name: "Checkout", curl: `curl -X POST https://api.shop.example.com/v2/checkout/health -H 'Authorization: Bearer sk_live_demo' --json '{"dry_run":true}'`,
     base: 420, slow_ms: 1500, incidents: [[6, 22, "Expected status 200-399, got 502"]], slow: [[14, 40]] },
-  { id: "m_search", project: "p_store", name: "Search API", curl: "curl https://search.shop.example.com/v1/query?q=shoes -H 'x-api-key: demo'", base: 240,
+  { id: "m_search", project: "p_store", name: "Search API", public_name: "Search", curl: "curl https://search.shop.example.com/v1/query?q=shoes -H 'x-api-key: demo'", base: 240,
     down: { since: 18, error: "Expected status 200-399, got 503" } },
-  { id: "m_cdn", project: "p_store", name: "Product images (CDN)", curl: "curl -I https://cdn.shop.example.com/img/hero.webp", base: 45, regions: 1 },
+  { id: "m_cdn", project: "p_store", name: "Product images (CDN)", public_name: "Product images", curl: "curl -I https://cdn.shop.example.com/img/hero.webp", base: 45, regions: 1 },
   { id: "m_login", project: "p_auth", name: "Login page", curl: "curl -L https://auth.example.com/login", base: 210, keyword: "Sign in" },
   { id: "m_token", project: "p_auth", name: "Token endpoint", curl: "curl https://auth.example.com/api/me -H 'Authorization: Bearer {{token}}'", base: 160,
     steps: [{ name: "Log in", curl: `curl https://auth.example.com/oauth/token --json '{"grant_type":"client_credentials"}'`, vars: [["token", "$.access_token"]] }] },
@@ -103,7 +103,7 @@ for (const m of monitors) {
   out.push(insert("monitors", {
     id: m.id, project_id: m.project, type: hb ? "heartbeat" : "http", name: m.name, curl: m.curl ?? "", request,
     steps: JSON.stringify(steps), regions: m.regions ?? 0, slow_ms: m.slow_ms ?? 0, interval_sec: interval, timeout_ms: 10_000,
-    expected_status: "200-399", keyword: m.keyword ?? "", paused: 0, status: last.isDown ? "down" : "up",
+    expected_status: "200-399", keyword: m.keyword ?? "", paused: 0, public_name: m.public_name ?? "", status: last.isDown ? "down" : "up",
     last_checked_at: last.t, last_latency_ms: last.latency, last_error: last.error, last_ok: lastOk && JSON.stringify(lastOk),
     next_check_at: now + 30 * DAY, // demo data: keep the cron from checking these made-up URLs
     token: hb ? (m.id === "m_backup" ? "a1b2c3d4e5f6a7b8c9d0e1f2" : "f2e1d0c9b8a7f6e5d4c3b2a1") : null,
@@ -116,4 +116,18 @@ for (const m of monitors) {
 out.push(insert("expiry", { host: "api.shop.example.com", kind: "ssl", expires_at: now + 54 * DAY, checked_at: now, error: null, warned: 0 }));
 out.push(insert("expiry", { host: "example.com", kind: "domain", expires_at: now + 212 * DAY, checked_at: now, error: null, warned: 0 }));
 out.push(insert("maintenance", { id: "w_db", project_id: "p_auth", title: "Database upgrade", starts_at: now + 2 * DAY, ends_at: now + 2 * DAY + 2 * HOUR, repeat: "weekly", created_by: user, created_at: now }));
+// Status page incidents on Storefront: one open, one resolved yesterday.
+const incident = (id, title, impact, updates, resolved) => {
+  out.push(insert("incidents", { id, project_id: "p_store", title, impact, created_by: user, created_at: now - updates[0][0] * MIN, resolved_at: resolved ? now - updates.at(-1)[0] * MIN : null }));
+  for (const [ago, status, message] of updates) out.push(insert("incident_updates", { incident_id: id, ts: now - ago * MIN, status, message, author: "priya@example.com" }));
+};
+incident("i_search", "Search results are not loading", "minor", [
+  [17 * 60, "investigating", "Search is returning errors. Browsing and checkout work normally."],
+  [16 * 60, "identified", "A search index rebuild is stuck. We're restarting it; results may be stale until it finishes."],
+]);
+incident("i_checkout", "Some payments failed", "major", [
+  [6 * 60 + 25, "investigating", "Some checkouts are failing with an error. We're looking into it."],
+  [6 * 60 + 10, "monitoring", "We rolled back a payment provider change. Checkouts are going through again."],
+  [5 * 60 + 40, "resolved", "Fixed. Orders that failed between 09:35 and 09:57 were not charged."],
+], true);
 console.log(out.join("\n"));

@@ -11,6 +11,8 @@ const STATUS_LABEL = { up: "Up", down: "Down", pending: "Pending", paused: "Paus
 const REMIND = [[0, "Off"], [15, "15 min"], [30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"]];
 const MAINT = [[15, "15 min"], [30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [480, "8 hours"], [1440, "24 hours"]];
 const REPEAT = [["none", "Once"], ["daily", "Every day"], ["weekly", "Every week"]];
+const IMPACT = [["minor", "Minor: degraded or partly down"], ["major", "Major: down for most users"]];
+const INCIDENT_STATUS = [["investigating", "Investigating"], ["identified", "Identified"], ["monitoring", "Monitoring"], ["resolved", "Resolved"]];
 const MUTE = [[30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [480, "8 hours"], [1440, "24 hours"]];
 
 const state = { me: "", projects: [], channels: [], page: {}, filter: { q: "", status: "all" }, chart: null, import: null };
@@ -69,6 +71,7 @@ const ICONS = {
   phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
   siren: '<path d="M7 18v-6a5 5 0 1 1 10 0v6"/><path d="M5 21a1 1 0 0 0 1-1v-1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1a1 1 0 0 0 1 1z"/><path d="M21 12h1M18.5 4.5 18 5M2 12h1M12 2v1M4.93 4.93l.71.71"/>',
   wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
 };
 const icon = (name, cls = "") =>
@@ -357,8 +360,10 @@ async function viewProject([id]) {
         ${mutedLine(p.muted_until, "projects", p.id)}
         ${maintLine(p.maintenance)}
         ${p.status_slug ? html`<p class="notify-line">${icon("globe")}<span>Public status page: <a class="linkish" href="/status/${p.status_slug}" target="_blank" rel="noopener">${location.host}/status/${p.status_slug}</a></span></p>` : ""}
+        ${p.incidents.filter((i) => !i.resolved_at).map((i) => html`<p class="notify-line incident-line ${i.impact}">${icon("megaphone")}<span>Open incident: <b>${i.title}</b> · ${label(INCIDENT_STATUS, i.updates[0]?.status)} <button class="linkish" data-action="incident-update" data-id="${i.id}">Post update</button></span></p>`)}
       </div>
       <div class="actions">
+        ${p.status_slug ? html`<button class="btn icon" data-action="incidents" aria-label="Status page incidents" data-tip="Post an incident to the status page">${icon("megaphone")}</button>` : ""}
         <button class="btn icon" data-action="maintenance" aria-label="Maintenance windows" data-tip="Maintenance windows">${icon("wrench")}</button>
         ${p.muted_until > Date.now() ? "" : html`<button class="btn icon" data-action="mute" data-target="projects" data-id="${p.id}" aria-label="Mute alerts" data-tip="Mute alerts for this project">${icon("bellOff")}</button>`}
         <button class="btn icon" data-action="import" aria-label="Import from Uptime Kuma" data-tip="Import from Uptime Kuma">${icon("upload")}</button>
@@ -431,6 +436,74 @@ async function submitMaintenance(form) {
   toast("Maintenance scheduled");
   await render({ quiet: true });
   openModal(maintenanceModal(state.page.project));
+}
+
+function incidentsModal(p) {
+  const open = p.incidents.filter((i) => !i.resolved_at), done = p.incidents.filter((i) => i.resolved_at);
+  const row = (i) => html`
+    <div class="list-row">
+      <div class="main-col"><span class="t truncate">${i.title} <span class="pill ${i.impact === "major" ? "down" : "slow"}">${i.impact === "major" ? "Major" : "Minor"}</span></span>
+        <span class="s">${label(INCIDENT_STATUS, i.updates[0]?.status)} · ${stamp(i.updates[0]?.ts ?? i.created_at)} · ${plural(i.updates.length, "update")}</span></div>
+      ${i.resolved_at ? "" : html`<button type="button" class="btn" data-action="incident-update" data-id="${i.id}">Post update</button>`}
+      <button type="button" class="btn icon danger-ghost" data-action="delete-incident" data-id="${i.id}" aria-label="Delete incident" data-tip="Delete">${icon("trash")}</button>
+    </div>`;
+  return html`
+    <form id="incident-form" class="modal-form">
+      <header class="modal-head">
+        <div><h2>Status page incidents</h2><p class="sub">Tell your users what's going on. Posts appear on <a class="linkish" href="/status/${p.status_slug}" target="_blank" rel="noopener">the status page</a> and its RSS feed. Outages your monitors catch show up there on their own.</p></div>
+        ${closeBtn()}
+      </header>
+      <div class="modal-body">
+        ${open.length ? html`<div class="card">${open.map(row)}</div>` : ""}
+        <label class="field"><span>New incident</span><input class="input" name="title" required maxlength="120" placeholder="Checkout is failing for some users"></label>
+        <div class="row2">
+          <label class="field"><span>Impact</span>${select("impact", IMPACT, "minor")}</label>
+          <label class="field"><span>Status</span>${select("status", INCIDENT_STATUS, "investigating")}</label>
+        </div>
+        <label class="field"><span>Message</span><textarea class="input" name="message" rows="3" required maxlength="2000" placeholder="We're looking into failed payments. Next update in 30 minutes."></textarea></label>
+        ${done.length ? html`<span class="sub">Resolved in the last 14 days</span><div class="card">${done.map(row)}</div>` : ""}
+      </div>
+      <footer class="modal-foot"><span class="grow"></span>
+        <button type="button" class="btn ghost" data-action="close-modal">Close</button>
+        <button class="btn primary" type="submit">${icon("megaphone")}Post incident</button>
+      </footer>
+    </form>`;
+}
+
+function incidentUpdateModal(i) {
+  const next = { investigating: "identified", identified: "monitoring", monitoring: "resolved" }[i.updates[0]?.status] ?? "resolved";
+  return html`
+    <form id="incident-update-form" class="modal-form" data-id="${i.id}">
+      <header class="modal-head"><div><h2>${i.title}</h2><p class="sub">Post an update. Pick Resolved to close the incident.</p></div>${closeBtn()}</header>
+      <div class="modal-body">
+        <div class="row2">
+          <label class="field"><span>Status</span>${select("status", INCIDENT_STATUS, next)}</label>
+          <label class="field"><span>Impact</span>${select("impact", IMPACT, i.impact)}</label>
+        </div>
+        <label class="field"><span>Message</span><textarea class="input" name="message" rows="3" required maxlength="2000" autofocus placeholder="${next === "resolved" ? "Everything is working again." : "We found the cause and are rolling out a fix."}"></textarea></label>
+        <ol class="update-list">${i.updates.map((u) => html`<li><b>${label(INCIDENT_STATUS, u.status)}</b> <span class="muted">${stamp(u.ts)} · ${u.author}</span><p>${u.message}</p></li>`)}</ol>
+      </div>
+      <footer class="modal-foot"><span class="grow"></span>
+        <button type="button" class="btn ghost" data-action="incidents">Back</button>
+        <button class="btn primary" type="submit">Post update</button>
+      </footer>
+    </form>`;
+}
+
+async function submitIncident(form) {
+  const f = form.elements;
+  await api(`/projects/${state.page.projectId}/incidents`, { body: { title: f.title.value, impact: f.impact.value, status: f.status.value, message: f.message.value } });
+  closeModal();
+  toast("Incident posted to the status page");
+  render({ quiet: true });
+}
+
+async function submitIncidentUpdate(form) {
+  const f = form.elements;
+  await api(`/incidents/${form.dataset.id}/updates`, { body: { status: f.status.value, impact: f.impact.value, message: f.message.value } });
+  closeModal();
+  toast(f.status.value === "resolved" ? "Incident resolved" : "Update posted");
+  render({ quiet: true });
 }
 
 function filteredMonitors() {
@@ -785,11 +858,16 @@ function projectForm(p) {
         </div>
         <div class="field">
           <label class="check"><input type="checkbox" name="status_on" ${p?.status_slug ? raw("checked") : ""}><span>Public status page</span></label>
-          <div class="input-row status-slug" ${p?.status_slug ? "" : raw("hidden")}>
-            <span class="prefix mono">${location.host}/status/</span>
-            <input class="input mono" name="status_slug" maxlength="40" pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]" placeholder="acme" value="${p?.status_slug ?? ""}">
+          <div class="status-opts col" ${p?.status_slug ? "" : raw("hidden")}>
+            <div class="input-row status-slug">
+              <span class="prefix mono">${location.host}/status/</span>
+              <input class="input mono" name="status_slug" maxlength="40" pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" placeholder="acme" value="${p?.status_slug ?? ""}">
+            </div>
+            ${p && state.page.monitors?.length ? html`<span class="sub">Show these monitors</span>
+              ${checkList("status_monitor_ids", state.page.monitors.map((m) => ({ id: m.id, name: m.name })), (id) => state.page.monitors.find((m) => m.id === id).on_status)}
+              <p class="hint">To use a different name on the page, edit the monitor.</p>` : ""}
           </div>
-          <p class="hint">Anyone with the link sees monitor names and uptime, never URLs or errors. Needs a Cloudflare Access Bypass rule for <code>/status</code>.</p>
+          <p class="hint">Anyone with the link sees the names and uptime of the monitors you pick, never URLs or errors. Needs a Cloudflare Access Bypass rule for <code>/status</code>.</p>
         </div>
         ${p ? html`
           <div class="danger-zone">
@@ -863,6 +941,13 @@ function monitorForm(m) {
               <label class="check plain"><input type="checkbox" name="regions" ${m?.regions ? raw("checked") : ""}><span>Check from US, EU and Asia. Alert only when 2 of 3 fail.</span></label>
             </div>
           </details>
+          <details class="advanced" ${m && (!m.on_status || m.public_name) ? raw("open") : ""}>
+            <summary>${icon("chev")}Status page</summary>
+            <div class="col pad">
+              <label class="check plain"><input type="checkbox" name="on_status" ${m && !m.on_status ? "" : raw("checked")}><span>Show on the project's public status page</span></label>
+              <label class="field"><span>Name on the status page<em>optional</em></span><input class="input" name="public_name" maxlength="100" placeholder="Same as the monitor name" value="${m?.public_name ?? ""}"></label>
+            </div>
+          </details>
           <details class="advanced http-only" ${m?.steps?.length ? raw("open") : ""}>
             <summary>${icon("chev")}Steps before this request<em class="muted">log in, get a token</em></summary>
             <div class="col pad">
@@ -890,7 +975,7 @@ function monitorForm(m) {
 
 function monitorValues(form) {
   const f = form.elements;
-  const base = { type: form.dataset.type, name: f.name.value, interval_sec: Number(f.interval_sec.value) };
+  const base = { type: form.dataset.type, name: f.name.value, interval_sec: Number(f.interval_sec.value), on_status: f.on_status.checked, public_name: f.public_name.value };
   if (form.dataset.type === "heartbeat") return base;
   return {
     ...base,
@@ -1384,6 +1469,17 @@ const actions = {
   },
   "new-channel": (el) => openModal(channelForm(null, el.dataset.type)),
   maintenance: () => openModal(maintenanceModal(state.page.project)),
+  incidents: () => openModal(incidentsModal(state.page.project)),
+  "incident-update": (el) => openModal(incidentUpdateModal(state.page.project.incidents.find((i) => i.id === el.dataset.id))),
+
+  async "delete-incident"(el) {
+    const i = state.page.project.incidents.find((x) => x.id === el.dataset.id);
+    if (!(await confirmDialog({ title: `Delete "${i.title}"?`, body: "It disappears from the status page and its feed. Resolve it instead if it really happened." }))) return;
+    await api(`/incidents/${i.id}`, { method: "DELETE" });
+    toast("Incident deleted");
+    await render({ quiet: true });
+    openModal(incidentsModal(state.page.project));
+  },
 
   async "delete-maintenance"(el) {
     await api(`/maintenance/${el.dataset.id}`, { method: "DELETE" });
@@ -1568,6 +1664,7 @@ async function submitProject(form) {
     name: f.name.value, description: f.description.value, channel_ids: checked(form, "channel_ids"),
     remind_min: Number(f.remind_min.value), escalate_min: Number(f.escalate_min.value), escalate_to: checked(form, "escalate_to"),
     status_slug: f.status_on.checked ? f.status_slug.value : "",
+    ...(form.querySelector("[name=status_monitor_ids]") ? { status_monitor_ids: checked(form, "status_monitor_ids") } : {}),
   };
   const p = id ? await api(`/projects/${id}`, { method: "PATCH", body }) : await api("/projects", { body });
   closeModal();
@@ -1631,7 +1728,7 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("submit", async (e) => {
   const form = e.target;
-  const handler = { "project-form": submitProject, "monitor-form": submitMonitor, "import-form": submitImport, "channel-form": submitChannel, "maintenance-form": submitMaintenance }[form.id];
+  const handler = { "project-form": submitProject, "monitor-form": submitMonitor, "import-form": submitImport, "channel-form": submitChannel, "maintenance-form": submitMaintenance, "incident-form": submitIncident, "incident-update-form": submitIncidentUpdate }[form.id];
   if (!handler) return;
   e.preventDefault();
   const btn = form.querySelector("[type=submit]");
@@ -1657,8 +1754,7 @@ document.addEventListener("change", (e) => {
   if (t.name === "type" && t.form?.id === "channel-form") $("#channel-fields", t.form).innerHTML = str(channelFieldsHtml(t.value));
   if (t.name === "type" && t.form?.id === "monitor-form") t.form.dataset.type = t.value;
   if (t.name === "status_on") {
-    const row = $(".status-slug", t.form);
-    row.hidden = !t.checked;
+    $(".status-opts", t.form).hidden = !t.checked;
     const slug = t.form.elements.status_slug;
     if (t.checked && !slug.value) slug.value = t.form.elements.name.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
   }

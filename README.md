@@ -99,7 +99,7 @@ Curly is an apricot poodle with one job: watch your endpoints and bark the momen
 - Uptime for 24h, 7d and 30d, response-time chart, incident timeline.
 - **Weekly report** in your chat every Monday.
 - **SSL certificate and domain expiry** warnings at 14 and 3 days.
-- **Public status page** per project, with 30-day uptime bars and incidents.
+- **Public status page** per project: uptime bars, incident updates you write, RSS feed, JSON and a badge.
 - **Monitors as code**: pull, plan and apply a JSON file over the API.
 - **Import from Uptime Kuma**, one project per site, notifications included.
 
@@ -185,7 +185,7 @@ Go to **Notifications**, pick a channel, and click **Send test**.
 Two paths are meant for people and servers that can't sign in to Access:
 
 - **`/hb`** for heartbeat pings from your cron jobs. Each ping URL carries its own random token, and a ping can only say "I'm alive".
-- **`/status`** for public status pages. They show monitor names and uptime only, never URLs or errors.
+- **`/status`** for public status pages. They show the monitors you pick and the incidents you post, never URLs or errors.
 
 For each one you use, add an Access application for that path on the same domain, with a **Bypass** policy for *Everyone*.
 
@@ -194,13 +194,27 @@ For each one you use, add an Access application for that path on the same domain
 <details>
 <summary><b>Public status page</b></summary>
 
-In **Project settings**, tick **Public status page** and pick an address, like `/status/acme`. The page shows:
+In **Project settings**, tick **Public status page**, pick an address like `/status/acme`, and tick the monitors to show. To show a friendlier name ("Checkout" instead of "POST /v2/checkout"), edit the monitor and open **Status page**.
 
+The page shows:
+
+- an overall banner: operational, degraded (slow), partial or major outage, or maintenance,
 - one line per monitor, with 30 days of daily uptime bars,
+- incidents you posted, with every update,
 - open and upcoming maintenance,
-- incidents from the last 14 days.
+- outages the monitors caught on their own, from the last 14 days.
 
-It never shows URLs, error messages or responses. It refreshes every minute.
+**Post an incident** with the megaphone button on the project: a title, minor or major impact, and a message. Add updates as you go (Investigating, Identified, Monitoring, Resolved). An open incident sets the banner, even if the monitors look fine.
+
+Next to the page:
+
+| URL | What it's for |
+|---|---|
+| `/status/acme/feed.atom` | RSS/Atom feed. Subscribe in a feed reader, or in Slack with `/feed subscribe`. |
+| `/status/acme/status.json` | Current status, shaped like Atlassian Statuspage's `status.json`, so existing tools can read it. |
+| `/status/acme/badge.svg` | A badge for your README: `![status](https://…/status/acme/badge.svg)` |
+
+It never shows URLs, error messages, responses or who posted. Everything is cached for a minute.
 </details>
 
 <details>
@@ -347,12 +361,14 @@ Local dev runs with `--local`, so AI summaries are skipped (Workers AI only runs
 
 ## 🗺 Roadmap
 
-- [x] Public status pages per project
+- [x] Public status pages per project, with incident updates, feed, JSON and badge
 - [x] PagerDuty, email and SMS channels
 - [x] Scheduled maintenance windows
 - [x] API and monitors as code
 - [ ] Microsoft Teams channel
 - [ ] Custom domains and branding for status pages
+- [ ] Email subscribers for status pages
+- [ ] 90-day status history (needs daily rollups; checks are kept 30 days)
 - [ ] JSON assertions (`$.status == "ok"`)
 - [ ] TCP and DNS monitors
 - [ ] Queue-based fan-out for very large installs
