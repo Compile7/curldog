@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { parseCurl, CurlError } from "./curl.ts";
 import { extract, fill, heartbeatResult, statusMatches, validExpected } from "./check.ts";
 import { getUser } from "./auth.ts";
-import { alertCard, buildRequest, duration, groupCard, testCard } from "./notify.ts";
-import { registrable } from "./jobs.ts";
+import { ackCard, alertCard, buildRequest, duration, groupCard, pagerDuty, testCard } from "./notify.ts";
+import { occurrence, registrable } from "./jobs.ts";
+import { incidents, renderStatus } from "./status.ts";
 
 test("parses a Chrome 'Copy as cURL' command", () => {
   const r = parseCurl(`curl 'https://api.example.com/v1/items?x=1' \\
@@ -251,4 +252,53 @@ test("groups Kuma monitors into one project per site", async () => {
     ["Publish 7", ["publish7.com"], [2]],
     ["SSOJet", ["ssojet.com"], [0, 1]],
   ]);
+});
+
+test("PagerDuty: trigger, acknowledge and resolve the same incident", () => {
+  const down = { kind: "down" as const, monitorId: "m1", projectId: "p1", project: "Pay", monitor: "Checkout", method: "GET", url: "https://x.dev", error: "503", statusCode: 503, latencyMs: 80 };
+  const [t] = pagerDuty("k", alertCard(down, "https://cd.dev"));
+  assert.equal(t.event_action, "trigger");
+  assert.equal(t.dedup_key, "curldog-m1");
+  assert.equal(t.payload!.severity, "critical");
+  assert.equal(t.links![0].href, "https://cd.dev/monitors/m1");
+  assert.deepEqual(pagerDuty("k", ackCard(down, "a@b.c")).map((e) => [e.event_action, e.dedup_key]), [["acknowledge", "curldog-m1"]]);
+  const [r] = pagerDuty("k", alertCard({ ...down, kind: "up" }));
+  assert.equal(r.event_action, "resolve");
+  assert.equal(r.payload, undefined);
+  assert.equal(pagerDuty("k", alertCard({ ...down, kind: "slow" }))[0].dedup_key, "curldog-m1:slow");
+  assert.deepEqual(pagerDuty("k", groupCard([down, { ...down, monitorId: "m2", kind: "up" }])).map((e) => e.event_action), ["trigger", "resolve"]);
+  assert.deepEqual(pagerDuty("k", testCard()).map((e) => e.event_action), ["trigger", "resolve"]);
+  assert.deepEqual(pagerDuty("k", { title: "Weekly report", lines: [], buttons: [] }), []);
+});
+
+test("maintenance windows: one-off, daily and weekly", () => {
+  const H = 3_600_000, D = 24 * H;
+  const once = { starts_at: 10 * H, ends_at: 12 * H, repeat: "none" as const };
+  assert.deepEqual(occurrence(once, 9 * H), { start: 10 * H, end: 12 * H });
+  assert.deepEqual(occurrence(once, 11 * H), { start: 10 * H, end: 12 * H });
+  assert.equal(occurrence(once, 12 * H), null);
+  const daily = { ...once, repeat: "daily" as const };
+  assert.deepEqual(occurrence(daily, 3 * D + 11 * H), { start: 3 * D + 10 * H, end: 3 * D + 12 * H });
+  assert.deepEqual(occurrence(daily, 3 * D + 13 * H), { start: 4 * D + 10 * H, end: 4 * D + 12 * H });
+  const weekly = { ...once, repeat: "weekly" as const };
+  assert.deepEqual(occurrence(weekly, 8 * D), { start: 14 * D + 10 * H, end: 14 * D + 12 * H });
+});
+
+test("status page pairs incidents and never shows URLs or errors", () => {
+  const names = new Map([["a", "API"], ["b", "Web"]]);
+  const ev = [{ monitor_id: "a", ts: 100, status: "down" }, { monitor_id: "b", ts: 150, status: "down" }, { monitor_id: "a", ts: 400, status: "up" }];
+  assert.deepEqual(incidents(ev, names), [{ name: "Web", start: 150, end: null }, { name: "API", start: 100, end: 400 }]);
+
+  const now = Date.UTC(2026, 9, 30, 12);
+  const page = renderStatus({
+    project: { name: "Acme <API>", description: "" },
+    monitors: [{ id: "a", name: "API", status: "down" }, { id: "b", name: "Web", status: "up" }],
+    days: [{ monitor_id: "a", day: Math.floor(now / 86_400_000), up: 0.5, n: 10 }],
+    events: [{ monitor_id: "a", ts: now - 60_000, status: "down" }],
+    windows: [],
+  }, now);
+  assert.ok(page.includes("<title>Acme &lt;API&gt; status</title>"));
+  assert.ok(page.includes("1 system down"));
+  assert.ok(page.includes("50.00% uptime"));
+  assert.ok(page.includes("API is down"));
 });

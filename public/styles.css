@@ -500,6 +500,13 @@ select.input { padding-right: 8px; cursor: pointer; }
 .ch-icon.google_chat { background: #0f9d58; }
 .ch-icon.telegram { background: #229ed9; }
 .ch-icon.webhook { background: #6b6b74; }
+.ch-icon.email { background: #C97B3A; }
+.ch-icon.pagerduty { background: #06ac38; }
+.ch-icon.sms { background: #e8445a; }
+.maint-line { color: #4a7fd4; }
+.status-slug { align-items: center; }
+.status-slug[hidden] { display: none; }
+.status-slug .prefix { color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
 .ch-row .btn { flex: none; }
 .type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .type-card {

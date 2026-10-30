@@ -7,7 +7,7 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/hb/*"]
+    "run_worker_first": ["/api/*", "/hb/*", "/status/*"]
   },
   // Every minute: run due monitors and reminders. Hourly: prune, expiry checks, Monday weekly report.
   "triggers": { "crons": ["* * * * *"] },

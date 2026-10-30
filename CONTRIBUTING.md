@@ -41,17 +41,19 @@ This type-checks and runs the tests. CI runs the same command.
 
 | Path | What it does |
 |---|---|
-| `src/index.ts` | API routes, auth gate, cron entry point, heartbeat pings |
+| `src/index.ts` | API routes, auth gate, cron entry point, heartbeat pings, config export/apply |
 | `src/check.ts` | Running a check: steps, redirects, retries, regions, heartbeats, recording results |
 | `src/curl.ts` | Turns a pasted curl command into a request `fetch()` can send |
-| `src/notify.ts` | Alert cards and how each channel (Google Chat, Telegram, webhooks) renders them |
+| `src/notify.ts` | Alert cards and how each channel (Google Chat, Telegram, webhooks, email, PagerDuty, SMS) renders them |
 | `src/diagnose.ts` | DNS lookup and the AI failure summary |
-| `src/jobs.ts` | Reminders, escalation, weekly report, SSL and domain expiry |
+| `src/jobs.ts` | Maintenance windows, reminders, escalation, weekly report, SSL and domain expiry |
+| `src/status.ts` | Public status page |
 | `src/prober.ts` | Durable Object that runs a check from a specific region |
 | `src/auth.ts` | Cloudflare Access JWT verification |
 | `public/` | The UI: plain HTML, CSS and ES modules. No framework, no build step |
 | `migrations/` | D1 schema, applied in order |
 | `scripts/seed.mjs` | Demo data |
+| `scripts/curldog.mjs` | Monitors-as-code CLI: pull, plan, apply |
 
 ## House rules
 

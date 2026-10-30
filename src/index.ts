@@ -2,7 +2,8 @@ import { CurlError, parseCurl } from "./curl.ts";
 import { checkAndRecord, REGIONS, runCheck, validExpected, type MonitorRow, type Row, type Step } from "./check.ts";
 import { accessConfigured, getUser, type AuthEnv } from "./auth.ts";
 import { ackCard, deliver, send, sendAll, testCard, telegramChats, type Channel, type ChannelType } from "./notify.ts";
-import { refreshExpiry, registrable, remind, weeklyReport } from "./jobs.ts";
+import { inMaintenance, occurrence, refreshExpiry, registrable, remind, weeklyReport, type Window } from "./jobs.ts";
+import { loadStatus, renderStatus } from "./status.ts";
 import type { Prober } from "./prober.ts";
 
 export { Prober } from "./prober.ts";
@@ -38,6 +39,7 @@ const DAY = 24 * HOUR;
 const INTERVALS = [60, 300, 600, 900, 1800, 3600];
 const REMIND_MIN = [0, 15, 30, 60, 120, 240];
 const MUTE_MIN = [0, 30, 60, 120, 240, 480, 1440];
+const MAINT_MIN = [15, 30, 60, 120, 240, 480, 1440];
 const HEARTBEAT_REQUEST = JSON.stringify({ method: "", url: "", headers: [], body: null, followRedirects: false });
 const RETAIN_CHECKS = 30 * DAY;
 const RETAIN_EVENTS = 90 * DAY;
@@ -56,10 +58,24 @@ function projectFields(b: Body, prev?: Record<string, unknown>) {
   const escalate_min = Number(b.escalate_min ?? prev?.escalate_min ?? 0);
   if (!REMIND_MIN.includes(remind_min) || !REMIND_MIN.includes(escalate_min)) bad("Pick a valid reminder or escalation time.");
   const escalate_to = JSON.stringify(idList(b.escalate_to) ?? JSON.parse(String(prev?.escalate_to ?? "[]")));
-  return { name, description, remind_min, escalate_min, escalate_to };
+  const status_slug = b.status_slug === undefined ? (prev?.status_slug as string | null) ?? null : String(b.status_slug ?? "").trim().toLowerCase() || null;
+  if (status_slug && !/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(status_slug)) bad("Status page address: 3 to 40 lowercase letters, numbers and dashes.");
+  return { name, description, remind_min, escalate_min, escalate_to, status_slug };
 }
 
-const CHANNEL_TYPES: Record<ChannelType, string> = { google_chat: "Google Chat", telegram: "Telegram", webhook: "Webhook" };
+const CHANNEL_TYPES: Record<ChannelType, string> = {
+  google_chat: "Google Chat", telegram: "Telegram", webhook: "Webhook", email: "Email", pagerduty: "PagerDuty", sms: "SMS",
+};
+
+// "a@x.com, b@y.com" or "+15551234567, +4412345678": up to 10, each checked.
+function list(v: unknown, re: RegExp, what: string) {
+  const items = String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!items.length || items.length > 10) bad(`Enter 1 to 10 ${what}s, separated by commas.`);
+  for (const it of items) if (!re.test(it)) bad(`"${it}" isn't a valid ${what}.`);
+  return items.join(", ");
+}
+const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[a-z]{2,}$/i;
+const PHONE = /^\+[1-9]\d{6,14}$/;
 
 function channelFields(b: Body) {
   const type = String(b.type) as ChannelType;
@@ -74,6 +90,25 @@ function channelFields(b: Body) {
     if (!/^\d+:[\w-]{20,}$/.test(token)) bad("That doesn't look like a Telegram bot token (e.g. 123456:ABC-DEF…).");
     if (!/^-?\d+$|^@\w{4,}$/.test(chat_id)) bad("Chat ID must be a number like -1001234567890, or @channelname.");
     config = { token, chat_id };
+  } else if (type === "email") {
+    const api_key = String(c.api_key ?? "").trim();
+    if (!/^re_\w{10,}$/.test(api_key)) bad("That doesn't look like a Resend API key (starts with re_).");
+    const from = String(c.from ?? "").trim();
+    const addr = /<([^>]+)>\s*$/.exec(from)?.[1] ?? from;
+    if (!EMAIL.test(addr)) bad('From must be an address on a domain you verified in Resend, like "CurlDog <alerts@acme.com>".');
+    config = { api_key, from, to: list(c.to, EMAIL, "email address") };
+  } else if (type === "pagerduty") {
+    const routing_key = String(c.routing_key ?? "").trim();
+    if (!/^[a-z0-9]{32}$/i.test(routing_key)) bad("The integration key is 32 letters and numbers. Find it under Service → Integrations → Events API v2.");
+    config = { routing_key };
+  } else if (type === "sms") {
+    const account_sid = String(c.account_sid ?? "").trim();
+    const auth_token = String(c.auth_token ?? "").trim();
+    if (!/^AC[0-9a-f]{32}$/i.test(account_sid)) bad("Twilio Account SID starts with AC and is 34 characters.");
+    if (!/^[0-9a-f]{32}$/i.test(auth_token)) bad("Twilio Auth Token is 32 characters.");
+    const from = String(c.from ?? "").trim();
+    if (!PHONE.test(from) && !/^MG[0-9a-f]{32}$/i.test(from)) bad("From must be your Twilio number like +15551234567, or a Messaging Service SID (MG…).");
+    config = { account_sid, auth_token, from, to: list(c.to, PHONE, "phone number (like +15551234567)") };
   } else {
     const url = String(c.url ?? "").trim();
     if (type === "google_chat" && !url.startsWith("https://chat.googleapis.com/")) bad("Google Chat webhook URLs start with https://chat.googleapis.com/");
@@ -177,7 +212,7 @@ async function getMonitor(env: Env, id: string) {
 }
 
 const PROJECTS_SQL = `
-  SELECT p.id, p.name, p.description, p.muted_until, p.created_by, p.created_at,
+  SELECT p.id, p.name, p.description, p.muted_until, p.status_slug, p.created_by, p.created_at,
     (SELECT COUNT(*) FROM project_channels pc WHERE pc.project_id = p.id) AS channels,
     COUNT(m.id) AS total,
     COALESCE(SUM(m.paused = 0 AND m.status = 'up'), 0) AS up,
@@ -220,18 +255,31 @@ route("POST", "/projects", async (c) => {
   const f = projectFields(b);
   const p = { id: newId(), ...f, created_by: c.user, created_at: Date.now() };
   await c.env.DB.batch([
-    c.env.DB.prepare(`INSERT INTO projects (id, name, description, remind_min, escalate_min, escalate_to, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(p.id, p.name, p.description, p.remind_min, p.escalate_min, p.escalate_to, p.created_by, p.created_at),
+    insertProject(c.env, p),
     ...linkStatements(c.env, "project", p.id, idList(b.channel_ids) ?? []),
   ]);
   return p;
 });
 
+const insertProject = (env: Env, p: ReturnType<typeof projectFields> & { id: string; created_by: string; created_at: number }) =>
+  env.DB.prepare(`INSERT INTO projects (id, name, description, remind_min, escalate_min, escalate_to, status_slug, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(p.id, p.name, p.description, p.remind_min, p.escalate_min, p.escalate_to, p.status_slug, p.created_by, p.created_at);
+
+const updateProject = (env: Env, id: string, f: ReturnType<typeof projectFields>) =>
+  env.DB.prepare("UPDATE projects SET name = ?, description = ?, remind_min = ?, escalate_min = ?, escalate_to = ?, status_slug = ? WHERE id = ?")
+    .bind(f.name, f.description, f.remind_min, f.escalate_min, f.escalate_to, f.status_slug, id);
+
+// Adds when the window is (or next will be) open, for the UI.
+const withOccurrence = (w: Window, now: number) => {
+  const o = occurrence(w, now);
+  return { ...w, active: Boolean(o && o.start <= now), next_start: o?.start ?? null, next_end: o?.end ?? null };
+};
+
 route("GET", "/projects/:id", async (c) => {
   const project = await getProject(c.env, c.params.id);
   const since = Date.now() - DAY;
-  const [monitors, spark, uptime, channels] = await c.env.DB.batch([
+  const [monitors, spark, uptime, channels, windows] = await c.env.DB.batch([
     c.env.DB.prepare(`
       SELECT id, type, name, request, token, interval_sec, paused, status, slow, muted_until, acked_by, last_checked_at, last_latency_ms, last_error
       FROM monitors WHERE project_id = ? ORDER BY name COLLATE NOCASE`).bind(project.id),
@@ -248,6 +296,7 @@ route("GET", "/projects/:id", async (c) => {
     c.env.DB.prepare(`
       SELECT c.id, c.name, c.type FROM project_channels pc JOIN channels c ON c.id = pc.channel_id
       WHERE pc.project_id = ? ORDER BY c.name COLLATE NOCASE`).bind(project.id),
+    c.env.DB.prepare("SELECT * FROM maintenance WHERE project_id = ? ORDER BY starts_at").bind(project.id),
   ]);
   const sparks = new Map<string, unknown[]>();
   for (const s of spark.results as { monitor_id: string }[]) {
@@ -256,7 +305,10 @@ route("GET", "/projects/:id", async (c) => {
   }
   const uptimes = new Map((uptime.results as { monitor_id: string; uptime: number }[]).map((u) => [u.monitor_id, u.uptime]));
   return {
-    project: { ...project, channels: channels.results },
+    project: {
+      ...project, channels: channels.results,
+      maintenance: (windows.results as unknown as Window[]).map((w) => withOccurrence(w, Date.now())).filter((w) => w.next_start !== null),
+    },
     monitors: (monitors.results as unknown as MonitorRow[]).map(({ request, token, ...m }) => {
       const r = JSON.parse(request);
       const [method, url] = m.type === "heartbeat" ? ["PING", `/hb/${token}`] : [r.method, r.url];
@@ -271,11 +323,34 @@ route("PATCH", "/projects/:id", async (c) => {
   const f = projectFields(b, prev);
   const ids = idList(b.channel_ids);
   await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE projects SET name = ?, description = ?, remind_min = ?, escalate_min = ?, escalate_to = ? WHERE id = ?")
-      .bind(f.name, f.description, f.remind_min, f.escalate_min, f.escalate_to, prev.id),
+    updateProject(c.env, prev.id as string, f),
     ...(ids ? linkStatements(c.env, "project", prev.id as string, ids) : []),
   ]);
   return { ...prev, ...f };
+});
+
+// --- maintenance windows ---
+
+route("POST", "/projects/:id/maintenance", async (c) => {
+  const project = await getProject(c.env, c.params.id);
+  const b = await body(c);
+  const title = String(b.title ?? "").trim().slice(0, 120) || "Scheduled maintenance";
+  const starts_at = Number(b.starts_at);
+  const minutes = Number(b.minutes);
+  const repeat = String(b.repeat ?? "none");
+  if (!Number.isFinite(starts_at) || starts_at < Date.now() - 30 * DAY) bad("Pick when the maintenance starts.");
+  if (!MAINT_MIN.includes(minutes)) bad("Pick how long the maintenance lasts.");
+  if (!["none", "daily", "weekly"].includes(repeat)) bad("Pick how often it repeats.");
+  if (repeat === "daily" && minutes >= 1440) bad("A daily window must be shorter than a day.");
+  const w = { id: newId(), project_id: project.id as string, title, starts_at, ends_at: starts_at + minutes * 60_000, repeat, created_by: c.user, created_at: Date.now() };
+  if (repeat === "none" && w.ends_at <= Date.now()) bad("That window is already over.");
+  await c.env.DB.prepare("INSERT INTO maintenance (id, project_id, title, starts_at, ends_at, repeat, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(w.id, w.project_id, w.title, w.starts_at, w.ends_at, w.repeat, w.created_by, w.created_at).run();
+  return withOccurrence(w as Window, Date.now());
+});
+
+route("DELETE", "/maintenance/:id", async (c) => {
+  await c.env.DB.prepare("DELETE FROM maintenance WHERE id = ?").bind(c.params.id).run();
 });
 
 // --- notification channels ---
@@ -433,19 +508,24 @@ route("GET", "/monitors/:id", async (c) => {
   return { monitor: publicMonitor(m), stats: stats.results[0], checks: checks.results, events: events.results, expiry: expiry.results };
 });
 
-route("PATCH", "/monitors/:id", async (c) => {
-  const prev = await getMonitor(c.env, c.params.id);
-  const f = monitorFields(await body(c), prev);
+function updateMonitor(env: Env, prev: MonitorRow, f: ReturnType<typeof monitorFields>) {
   const resumed = prev.paused && !f.paused;
   const requestChanged = f.request !== prev.request || f.steps !== prev.steps || f.expected_status !== prev.expected_status || f.keyword !== prev.keyword;
   // Re-check on the next cron tick after a resume or a request change.
   const next_check_at = resumed || requestChanged ? 0 : prev.next_check_at;
-  await c.env.DB.prepare(`
+  const stmt = env.DB.prepare(`
     UPDATE monitors SET name = ?, curl = ?, request = ?, steps = ?, regions = ?, slow_ms = ?, interval_sec = ?, timeout_ms = ?,
       expected_status = ?, keyword = ?, paused = ?, next_check_at = ? WHERE id = ?`)
     .bind(f.name, f.curl, f.request, f.steps, f.regions, f.slow_ms, f.interval_sec, f.timeout_ms, f.expected_status, f.keyword,
-      f.paused, next_check_at, prev.id)
-    .run();
+      f.paused, next_check_at, prev.id);
+  return { stmt, next_check_at };
+}
+
+route("PATCH", "/monitors/:id", async (c) => {
+  const prev = await getMonitor(c.env, c.params.id);
+  const f = monitorFields(await body(c), prev);
+  const { stmt, next_check_at } = updateMonitor(c.env, prev, f);
+  await stmt.run();
   return publicMonitor({ ...prev, ...f, next_check_at });
 });
 
@@ -503,6 +583,125 @@ route("POST", "/projects/:id/mute", async (c) => {
 
 route("GET", "/regions", async () => REGIONS.map(([, label]) => label));
 
+// --- config as code: export everything, or apply a file (scripts/curldog.mjs) ---
+
+const sameName = (a: unknown, b: unknown) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Body;
+
+function monitorConfig(m: MonitorRow) {
+  if (m.type === "heartbeat") return { name: m.name, type: "heartbeat", interval_sec: m.interval_sec, paused: Boolean(m.paused) };
+  const steps = (JSON.parse(m.steps) as Step[]).map(({ name, curl, vars }) => ({ name, curl, vars }));
+  return {
+    name: m.name, curl: m.curl, interval_sec: m.interval_sec, timeout_ms: m.timeout_ms, expected_status: m.expected_status,
+    keyword: m.keyword, regions: Boolean(m.regions), slow_ms: m.slow_ms, paused: Boolean(m.paused), ...(steps.length ? { steps } : {}),
+  };
+}
+
+async function loadAll(env: Env) {
+  const [projects, monitors, channels, links] = await env.DB.batch([
+    env.DB.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE"),
+    env.DB.prepare("SELECT * FROM monitors ORDER BY name COLLATE NOCASE"),
+    env.DB.prepare("SELECT id, name FROM channels"),
+    env.DB.prepare("SELECT project_id, channel_id FROM project_channels"),
+  ]);
+  return {
+    projects: projects.results as Record<string, any>[],
+    monitors: monitors.results as unknown as MonitorRow[],
+    channels: channels.results as { id: string; name: string }[],
+    links: links.results as { project_id: string; channel_id: string }[],
+  };
+}
+
+route("GET", "/config", async (c) => {
+  const all = await loadAll(c.env);
+  const chName = new Map(all.channels.map((ch) => [ch.id, ch.name]));
+  return {
+    projects: all.projects.map((p) => ({
+      name: p.name, description: p.description, status_slug: p.status_slug,
+      channels: all.links.filter((l) => l.project_id === p.id).map((l) => chName.get(l.channel_id)),
+      remind_min: p.remind_min, escalate_min: p.escalate_min,
+      escalate_to: (JSON.parse(p.escalate_to) as string[]).map((id) => chName.get(id)).filter(Boolean),
+      monitors: all.monitors.filter((m) => m.project_id === p.id).map(monitorConfig),
+    })),
+  };
+});
+
+// Creates or updates projects and monitors by name. Fields left out keep their current value.
+// Channels are referenced by name, never created here: they hold secrets that don't belong in a config file.
+// prune: also delete monitors in the listed projects that the file doesn't mention. Projects are never deleted.
+route("PUT", "/config", async (c) => {
+  const b = await body(c);
+  if (!Array.isArray(b.projects)) bad('Expected a JSON body like { "projects": [...] }.');
+  const dry = Boolean(b.dry_run), prune = Boolean(b.prune);
+  const all = await loadAll(c.env);
+  const channelIds = (names: unknown, where: string) => {
+    if (names === undefined) return undefined;
+    if (!Array.isArray(names)) bad(`${where}: channels must be a list of channel names.`);
+    return (names as unknown[]).map((n) => all.channels.find((ch) => sameName(ch.name, n))?.id ?? bad(`${where}: there's no notification channel named "${n}".`));
+  };
+  const stmts: D1PreparedStatement[] = [];
+  const changes: string[] = [];
+  const heartbeats: { project: string; monitor: string; ping: string }[] = [];
+  const origin = new URL(c.req.url).origin;
+  const seenProjects = new Set<string>();
+
+  for (const raw of b.projects as unknown[]) {
+    const pb = obj(raw);
+    const where = `Project "${pb.name ?? ""}"`;
+    const prev = all.projects.find((p) => sameName(p.name, pb.name));
+    if (prev && seenProjects.has(prev.id)) bad(`${where} is listed twice.`);
+    const channel_ids = channelIds(pb.channels, where);
+    const f = projectFields({ ...pb, escalate_to: channelIds(pb.escalate_to, where) }, prev);
+    const pid: string = prev?.id ?? newId();
+    seenProjects.add(pid);
+    if (!prev) {
+      stmts.push(insertProject(c.env, { id: pid, ...f, created_by: c.user, created_at: Date.now() }));
+      changes.push(`+ project ${f.name}`);
+    } else if (Object.entries(f).some(([k, v]) => prev[k] !== v)) {
+      stmts.push(updateProject(c.env, pid, f));
+      changes.push(`~ project ${f.name}`);
+    }
+    const linked = all.links.filter((l) => l.project_id === pid).map((l) => l.channel_id).sort().join();
+    if (channel_ids && [...new Set(channel_ids)].sort().join() !== linked) {
+      stmts.push(...linkStatements(c.env, "project", pid, channel_ids));
+      if (prev) changes.push(`~ project ${f.name}: channels`);
+    }
+
+    const mine = all.monitors.filter((m) => m.project_id === pid);
+    const kept = new Set<string>();
+    for (const mraw of Array.isArray(pb.monitors) ? pb.monitors : []) {
+      const mb = obj(mraw);
+      const label = `${f.name} / ${mb.name ?? "unnamed"}`;
+      const prevM = mine.find((m) => sameName(m.name, mb.name));
+      if (prevM && kept.has(prevM.id)) bad(`Monitor "${label}" is listed twice.`);
+      if (prevM && (mb.type ?? prevM.type) !== prevM.type) bad(`Monitor "${label}": a monitor's type can't change. Rename it to create a new one.`);
+      let mf: ReturnType<typeof monitorFields>;
+      try { mf = monitorFields(mb, prevM); } catch (e) {
+        if (e instanceof HttpError || e instanceof CurlError) bad(`Monitor "${label}": ${e.message}`);
+        throw e;
+      }
+      if (!prevM) {
+        const { m, stmt } = newMonitor(c.env, pid, mf, c.user, 0);
+        stmts.push(stmt);
+        changes.push(`+ monitor ${label}`);
+        if (m.token) heartbeats.push({ project: f.name, monitor: m.name, ping: `${origin}/hb/${m.token}` });
+        continue;
+      }
+      kept.add(prevM.id);
+      if (Object.entries(mf).some(([k, v]) => (prevM as unknown as Body)[k] !== v)) {
+        stmts.push(updateMonitor(c.env, prevM, mf).stmt);
+        changes.push(`~ monitor ${label}`);
+      }
+    }
+    if (prune) for (const m of mine) if (!kept.has(m.id)) {
+      stmts.push(c.env.DB.prepare("DELETE FROM monitors WHERE id = ?").bind(m.id));
+      changes.push(`- monitor ${f.name} / ${m.name}`);
+    }
+  }
+  if (!dry) for (let i = 0; i < stmts.length; i += 100) await c.env.DB.batch(stmts.slice(i, i + 100));
+  return { dry_run: dry, changes, heartbeats };
+});
+
 // --- app URL for links in alerts ---
 
 // APP_URL if set, else the address people last opened the app at. Cron has no request to read it from.
@@ -529,12 +728,14 @@ async function pool<T>(items: T[], size: number, fn: (item: T) => Promise<unknow
   }));
 }
 
-async function runDue(env: Env, now: number, channels: Map<string, Channel[]>) {
+async function runDue(env: Env, now: number, channels: Map<string, Channel[]>, maintenance: Set<string>) {
   // Claim due monitors and push their next run forward in one statement, so overlapping ticks never double-check.
-  const { results } = await env.DB.prepare(`
+  let { results } = await env.DB.prepare(`
     UPDATE monitors SET next_check_at = ?1 + (CASE type WHEN 'heartbeat' THEN 60 ELSE interval_sec END) * 1000
     WHERE paused = 0 AND next_check_at <= ?1 RETURNING *`,
   ).bind(now).all<MonitorRow>();
+  // Projects in a maintenance window skip their turn: no checks, so no alerts and no downtime counted.
+  results = results.filter((m) => !maintenance.has(m.project_id));
   if (!results.length) return;
   const projects = await env.DB.prepare("SELECT id, name, muted_until FROM projects").all<{ id: string; name: string; muted_until: number }>();
   const byId = new Map(projects.results.map((p) => [p.id, p]));
@@ -562,11 +763,29 @@ async function ping(token: string, env: Env, exec: ExecutionContext) {
   return new Response("OK\n");
 }
 
+// Public status page: no Access login (needs a Bypass rule for /status), cached for a minute.
+async function statusPage(req: Request, slug: string, env: Env, exec: ExecutionContext) {
+  const cache = caches.default;
+  const key = new URL(req.url).origin + `/status/${slug}`; // ignores ?query, so it can't be used to skip the cache
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const now = Date.now();
+  const data = await loadStatus(env.DB, slug, now);
+  if (!data) return new Response("Status page not found.\n", { status: 404, headers: { "content-type": "text/plain" } });
+  const res = new Response(renderStatus(data, now), {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60", "x-robots-tag": "noindex" },
+  });
+  exec.waitUntil(cache.put(key, res.clone()));
+  return res;
+}
+
 export default {
   async fetch(req, env, exec): Promise<Response> {
     const url = new URL(req.url);
     const hb = /^\/hb\/([a-f0-9]{24})\/?$/.exec(url.pathname);
     if (hb) return ping(hb[1], env, exec);
+    const st = /^\/status\/([a-z0-9-]+)\/?$/.exec(url.pathname);
+    if (st) return statusPage(req, st[1], env, exec);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
     const user = await getUser(req, env);
@@ -577,7 +796,7 @@ export default {
     }
     exec.waitUntil(rememberOrigin(env, url.origin));
     // JSON-only writes: a cross-site <form> can't send application/json, which blocks CSRF.
-    if ((req.method === "POST" || req.method === "PATCH") && !req.headers.get("content-type")?.includes("application/json")) {
+    if (["POST", "PATCH", "PUT"].includes(req.method) && !req.headers.get("content-type")?.includes("application/json")) {
       return json({ error: "Expected a JSON body." }, 415);
     }
 
@@ -590,6 +809,7 @@ export default {
       } catch (e) {
         if (e instanceof HttpError) return json({ error: e.message }, e.status);
         if (e instanceof CurlError) return json({ error: e.message }, 400);
+        if (/UNIQUE constraint failed: projects\.status_slug/.test(String(e))) return json({ error: "That status page address is taken. Pick another." }, 400);
         console.error(e);
         return json({ error: "Something went wrong on our side." }, 500);
       }
@@ -601,8 +821,9 @@ export default {
     const now = event.scheduledTime;
     const env = await withAppUrl(rawEnv);
     const channels = await channelsByProject(env);
-    await runDue(env, now, channels);
-    await remind(env, now, channels);
+    const maintenance = await inMaintenance(env.DB, now);
+    await runDue(env, now, channels, maintenance);
+    await remind(env, now, channels, maintenance);
     const t = new Date(now);
     if (t.getUTCMinutes() !== 0) return;
     // Hourly housekeeping runs after checks, in the background, so it never delays them.
@@ -610,6 +831,7 @@ export default {
       await env.DB.batch([
         env.DB.prepare("DELETE FROM checks WHERE ts < ?").bind(now - RETAIN_CHECKS),
         env.DB.prepare("DELETE FROM events WHERE ts < ?").bind(now - RETAIN_EVENTS),
+        env.DB.prepare("DELETE FROM maintenance WHERE repeat = 'none' AND ends_at < ?").bind(now),
       ]);
       await refreshExpiry(env, now, channels);
       // Monday 04:00 UTC (09:30 in India).

@@ -9,6 +9,8 @@ const INTERVALS = [[60, "1m"], [300, "5m"], [600, "10m"], [900, "15m"], [1800, "
 const SECRET = /authorization|cookie|token|secret|api[-_]?key|password/i;
 const STATUS_LABEL = { up: "Up", down: "Down", pending: "Pending", paused: "Paused" };
 const REMIND = [[0, "Off"], [15, "15 min"], [30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"]];
+const MAINT = [[15, "15 min"], [30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [480, "8 hours"], [1440, "24 hours"]];
+const REPEAT = [["none", "Once"], ["daily", "Every day"], ["weekly", "Every week"]];
 const MUTE = [[30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [480, "8 hours"], [1440, "24 hours"]];
 
 const state = { me: "", projects: [], channels: [], page: {}, filter: { q: "", status: "all" }, chart: null, import: null };
@@ -17,6 +19,9 @@ const CHANNEL = {
   google_chat: { label: "Google Chat", icon: "chat", hint: "Post alerts to a Google Chat space." },
   telegram: { label: "Telegram", icon: "send", hint: "Message a Telegram group or chat through your bot." },
   webhook: { label: "Slack / Discord", icon: "link", hint: "Any Slack or Discord incoming webhook." },
+  email: { label: "Email", icon: "mail", hint: "Send alerts by email through Resend." },
+  pagerduty: { label: "PagerDuty", icon: "siren", hint: "Page whoever is on call. Incidents resolve themselves." },
+  sms: { label: "SMS", icon: "phone", hint: "Text phones through Twilio. Incidents only." },
 };
 
 // ---------- templating: interpolations are escaped unless wrapped in raw() ----------
@@ -60,6 +65,11 @@ const ICONS = {
   sparkle: '<path d="M9.94 14.06 7 22l-2.94-7.94L-3.88 11.1 4.06 8.16 7 .22l2.94 7.94 7.94 2.94zM20 2v4M22 4h-4"/>',
   turtle: '<path d="M12 10 7 4M12 10l5-6M12 10v8M2 18h20M4 14a8 8 0 0 1 16 0"/>',
   minus: '<path d="M5 12h14"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  siren: '<path d="M7 18v-6a5 5 0 1 1 10 0v6"/><path d="M5 21a1 1 0 0 0 1-1v-1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1a1 1 0 0 0 1 1z"/><path d="M21 12h1M18.5 4.5 18 5M2 12h1M12 2v1M4.93 4.93l.71.71"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
 };
 const icon = (name, cls = "") =>
   raw(`<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`);
@@ -345,8 +355,11 @@ async function viewProject([id]) {
           ? html`Alerts go to ${p.channels.map((c, i) => html`${i ? ", " : ""}<b>${c.name}</b>`)}${p.remind_min ? ` · reminders every ${label(REMIND, p.remind_min)}` : ""}${p.escalate_min ? ` · escalates after ${label(REMIND, p.escalate_min)}` : ""}`
           : html`No alerts set up. <button class="linkish" data-action="edit-project">Add a channel</button>`}</span></p>
         ${mutedLine(p.muted_until, "projects", p.id)}
+        ${maintLine(p.maintenance)}
+        ${p.status_slug ? html`<p class="notify-line">${icon("globe")}<span>Public status page: <a class="linkish" href="/status/${p.status_slug}" target="_blank" rel="noopener">${location.host}/status/${p.status_slug}</a></span></p>` : ""}
       </div>
       <div class="actions">
+        <button class="btn icon" data-action="maintenance" aria-label="Maintenance windows" data-tip="Maintenance windows">${icon("wrench")}</button>
         ${p.muted_until > Date.now() ? "" : html`<button class="btn icon" data-action="mute" data-target="projects" data-id="${p.id}" aria-label="Mute alerts" data-tip="Mute alerts for this project">${icon("bellOff")}</button>`}
         <button class="btn icon" data-action="import" aria-label="Import from Uptime Kuma" data-tip="Import from Uptime Kuma">${icon("upload")}</button>
         <button class="btn" data-action="edit-project">${icon("sliders")}Settings</button>
@@ -370,6 +383,55 @@ const until = (ts) => (ts - Date.now() < DAY ? clock(ts) : stamp(ts));
 const mutedLine = (ts, target, id) => (ts > Date.now()
   ? html`<p class="notify-line muted-line">${icon("bellOff")}<span>Alerts muted until ${until(ts)} <button class="linkish" data-action="unmute" data-target="${target}" data-id="${id}">Unmute</button></span></p>`
   : "");
+
+// The open window, else the next one coming up.
+function maintLine(list = []) {
+  const w = list.find((x) => x.active) ?? [...list].sort((a, b) => a.next_start - b.next_start)[0];
+  if (!w) return "";
+  return html`<p class="notify-line ${w.active ? "maint-line" : ""}">${icon("wrench")}<span>${w.active
+    ? html`<b>${w.title}</b>: maintenance until ${until(w.next_end)}. Checks and alerts are paused.`
+    : html`Next maintenance: <b>${w.title}</b>, ${stamp(w.next_start)}`}</span></p>`;
+}
+
+function maintenanceModal(p) {
+  const list = p.maintenance ?? [];
+  const local = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000 + 3_600_000).toISOString().slice(0, 13) + ":00";
+  return html`
+    <form id="maintenance-form" class="modal-form">
+      <header class="modal-head">
+        <div><h2>Maintenance windows</h2><p class="sub">While a window is open, ${p.name} isn't checked and nobody is alerted. The status page shows it as maintenance.</p></div>
+        ${closeBtn()}
+      </header>
+      <div class="modal-body">
+        ${list.length ? html`<div class="card">${list.map((w) => html`
+          <div class="list-row">
+            <div class="main-col"><span class="t truncate">${w.title}${w.active ? html` <span class="pill paused">Now</span>` : ""}</span>
+              <span class="s">${w.active ? `Until ${stamp(w.next_end)}` : `${stamp(w.next_start)} to ${clock(w.next_end)}`} · ${label(REPEAT, w.repeat)}</span></div>
+            <button type="button" class="btn icon danger-ghost" data-action="delete-maintenance" data-id="${w.id}" aria-label="Delete window" data-tip="Delete">${icon("trash")}</button>
+          </div>`)}</div>` : html`<p class="hint">No windows scheduled.</p>`}
+        <label class="field"><span>Title</span><input class="input" name="title" maxlength="120" placeholder="Database upgrade"></label>
+        <div class="row3">
+          <label class="field"><span>Starts</span><input class="input" type="datetime-local" name="starts_at" required value="${local}"></label>
+          <label class="field"><span>Lasts</span>${select("minutes", MAINT, 60)}</label>
+          <label class="field"><span>Repeats</span>${select("repeat", REPEAT, "none")}</label>
+        </div>
+      </div>
+      <footer class="modal-foot"><span class="grow"></span>
+        <button type="button" class="btn ghost" data-action="close-modal">Close</button>
+        <button class="btn primary" type="submit">${icon("plus")}Schedule</button>
+      </footer>
+    </form>`;
+}
+
+async function submitMaintenance(form) {
+  const f = form.elements;
+  await api(`/projects/${state.page.projectId}/maintenance`, {
+    body: { title: f.title.value, starts_at: new Date(f.starts_at.value).getTime(), minutes: Number(f.minutes.value), repeat: f.repeat.value },
+  });
+  toast("Maintenance scheduled");
+  await render({ quiet: true });
+  openModal(maintenanceModal(state.page.project));
+}
 
 function filteredMonitors() {
   const { q, status } = state.filter;
@@ -721,6 +783,14 @@ function projectForm(p) {
             <span class="sub">Escalate to<em>defaults to the channels above</em></span>
             ${checkList("escalate_to", state.channels.map((c) => ({ id: c.id, name: c.name, type: c.type })), (id) => JSON.parse(p?.escalate_to ?? "[]").includes(id))}` : ""}
         </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" name="status_on" ${p?.status_slug ? raw("checked") : ""}><span>Public status page</span></label>
+          <div class="input-row status-slug" ${p?.status_slug ? "" : raw("hidden")}>
+            <span class="prefix mono">${location.host}/status/</span>
+            <input class="input mono" name="status_slug" maxlength="40" pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]" placeholder="acme" value="${p?.status_slug ?? ""}">
+          </div>
+          <p class="hint">Anyone with the link sees monitor names and uptime, never URLs or errors. Needs a Cloudflare Access Bypass rule for <code>/status</code>.</p>
+        </div>
         ${p ? html`
           <div class="danger-zone">
             <div><strong>Delete project</strong><small>Removes ${plural(state.page.monitors?.length ?? 0, "monitor")} and all their history.</small></div>
@@ -984,6 +1054,8 @@ function checkList(name, items, isChecked) {
 
 function channelTarget(ch) {
   if (ch.type === "telegram") return `Chat ${ch.config.chat_id}`;
+  if (ch.type === "email" || ch.type === "sms") return ch.config.to;
+  if (ch.type === "pagerduty") return `Key …${ch.config.routing_key.slice(-4)}`;
   try { const u = new URL(ch.config.url); return u.host + u.pathname.slice(0, 28) + (u.pathname.length > 28 ? "…" : ""); }
   catch { return ch.config.url; }
 }
@@ -1020,7 +1092,35 @@ async function viewNotifications(_, projectsP) {
     </div>`;
 }
 
+const field = (label, name, value, attrs = "") =>
+  html`<label class="field"><span>${label}</span><input class="input mono" name="${name}" required autocomplete="off" spellcheck="false" ${raw(attrs)} value="${value ?? ""}"></label>`;
+
 function channelFieldsHtml(type, cfg = {}) {
+  if (type === "email") return html`
+    <ol class="how">
+      <li>Sign up at <b>resend.com</b> (free for 3,000 emails a month) and verify your sending domain.</li>
+      <li>Create an API key with <b>Sending access</b> and paste it here.</li>
+    </ol>
+    ${field("Resend API key", "api_key", cfg.api_key, 'placeholder="re_…"')}
+    ${field("From", "from", cfg.from, 'placeholder="CurlDog &lt;alerts@acme.com&gt;"')}
+    ${field("To (comma separated)", "to", cfg.to, 'placeholder="oncall@acme.com, cto@acme.com"')}`;
+  if (type === "pagerduty") return html`
+    <ol class="how">
+      <li>In PagerDuty, open the service → <b>Integrations</b> → <b>Add integration</b> → <b>Events API V2</b>.</li>
+      <li>Copy the <b>Integration Key</b> and paste it here.</li>
+      <li>Down opens an incident, Acknowledge acknowledges it, and recovery resolves it.</li>
+    </ol>
+    ${field("Integration key", "routing_key", cfg.routing_key, 'placeholder="32 letters and numbers"')}`;
+  if (type === "sms") return html`
+    <ol class="how">
+      <li>In the Twilio console, copy your <b>Account SID</b> and <b>Auth Token</b>.</li>
+      <li>Use a Twilio number (or Messaging Service SID) as the sender.</li>
+      <li>Only down, recovery and reminder alerts are texted. Reports stay in chat.</li>
+    </ol>
+    ${field("Account SID", "account_sid", cfg.account_sid, 'placeholder="AC…"')}
+    ${field("Auth Token", "auth_token", cfg.auth_token)}
+    ${field("From", "from", cfg.from, 'placeholder="+15551234567"')}
+    ${field("To (comma separated)", "to", cfg.to, 'placeholder="+15557654321, +447700900123"')}`;
   if (type === "telegram") return html`
     <ol class="how">
       <li>Message <b>@BotFather</b> in Telegram, send <code>/newbot</code>, and copy the token.</li>
@@ -1083,7 +1183,7 @@ function channelValues(form) {
   return {
     type,
     name: f.name.value,
-    config: type === "telegram" ? { token: f.token.value, chat_id: f.chat_id.value } : { url: f.url.value },
+    config: Object.fromEntries([...$("#channel-fields", form).querySelectorAll("input[name]")].map((i) => [i.name, i.value])),
     project_ids: checked(form, "project_ids"),
   };
 }
@@ -1283,6 +1383,14 @@ const actions = {
     openModal(projectForm(state.page.project));
   },
   "new-channel": (el) => openModal(channelForm(null, el.dataset.type)),
+  maintenance: () => openModal(maintenanceModal(state.page.project)),
+
+  async "delete-maintenance"(el) {
+    await api(`/maintenance/${el.dataset.id}`, { method: "DELETE" });
+    toast("Maintenance window deleted");
+    await render({ quiet: true });
+    openModal(maintenanceModal(state.page.project));
+  },
   "edit-channel": (el) => openModal(channelForm(state.channels.find((c) => c.id === el.dataset.id))),
 
   async "delete-channel"(el) {
@@ -1368,7 +1476,7 @@ const actions = {
     const what = el.dataset.target === "projects" ? "this project" : "this monitor";
     openModal(html`
       <div class="modal-form">
-        <header class="modal-head"><div><h2>Mute alerts</h2><p class="sub">Checks keep running and history is kept. Only messages to Google Chat and Telegram stop for ${what}.</p></div>${closeBtn()}</header>
+        <header class="modal-head"><div><h2>Mute alerts</h2><p class="sub">Checks keep running and history is kept. Only notifications stop for ${what}.</p></div>${closeBtn()}</header>
         <div class="modal-body"><div class="mute-grid">
           ${MUTE.map(([v, l]) => html`<button class="btn" data-action="mute-set" data-target="${el.dataset.target}" data-id="${el.dataset.id}" data-minutes="${v}">${l}</button>`)}
         </div></div>
@@ -1459,6 +1567,7 @@ async function submitProject(form) {
   const body = {
     name: f.name.value, description: f.description.value, channel_ids: checked(form, "channel_ids"),
     remind_min: Number(f.remind_min.value), escalate_min: Number(f.escalate_min.value), escalate_to: checked(form, "escalate_to"),
+    status_slug: f.status_on.checked ? f.status_slug.value : "",
   };
   const p = id ? await api(`/projects/${id}`, { method: "PATCH", body }) : await api("/projects", { body });
   closeModal();
@@ -1522,7 +1631,7 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("submit", async (e) => {
   const form = e.target;
-  const handler = { "project-form": submitProject, "monitor-form": submitMonitor, "import-form": submitImport, "channel-form": submitChannel }[form.id];
+  const handler = { "project-form": submitProject, "monitor-form": submitMonitor, "import-form": submitImport, "channel-form": submitChannel, "maintenance-form": submitMaintenance }[form.id];
   if (!handler) return;
   e.preventDefault();
   const btn = form.querySelector("[type=submit]");
@@ -1547,6 +1656,12 @@ document.addEventListener("change", (e) => {
   if (t.id === "import-file" && t.files[0]) readImport(t.files[0]);
   if (t.name === "type" && t.form?.id === "channel-form") $("#channel-fields", t.form).innerHTML = str(channelFieldsHtml(t.value));
   if (t.name === "type" && t.form?.id === "monitor-form") t.form.dataset.type = t.value;
+  if (t.name === "status_on") {
+    const row = $(".status-slug", t.form);
+    row.hidden = !t.checked;
+    const slug = t.form.elements.status_slug;
+    if (t.checked && !slug.value) slug.value = t.form.elements.name.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  }
   const form = t.closest?.("#import-form");
   if (!form) return;
   if (t.name === "target") {

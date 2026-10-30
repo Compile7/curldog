@@ -7,7 +7,7 @@ const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const q = (v) => (v === null || v === undefined ? "NULL" : typeof v === "number" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
 const insert = (table, row) => `INSERT INTO ${table} (${Object.keys(row).join(", ")}) VALUES (${Object.values(row).map(q).join(", ")});`;
 const user = "dev@localhost";
-const out = ["DELETE FROM checks;", "DELETE FROM events;", "DELETE FROM monitors;", "DELETE FROM project_channels;", "DELETE FROM channels;", "DELETE FROM projects;", "DELETE FROM expiry;"];
+const out = ["DELETE FROM checks;", "DELETE FROM events;", "DELETE FROM monitors;", "DELETE FROM project_channels;", "DELETE FROM channels;", "DELETE FROM projects;", "DELETE FROM expiry;", "DELETE FROM maintenance;"];
 
 // Deterministic randomness, so screenshots look the same every time.
 let seed = 7;
@@ -20,7 +20,7 @@ const channels = [
 for (const c of channels) out.push(insert("channels", { ...c, created_by: user, created_at: now - 20 * DAY }));
 
 const projects = [
-  { id: "p_store", name: "Storefront", description: "shop.example.com · web and checkout", remind_min: 30, escalate_min: 60, escalate_to: '["ch_tg"]' },
+  { id: "p_store", name: "Storefront", description: "shop.example.com · web and checkout", status_slug: "storefront", remind_min: 30, escalate_min: 60, escalate_to: '["ch_tg"]' },
   { id: "p_auth", name: "Auth platform", description: "Login, tokens and SSO", remind_min: 15, escalate_min: 0, escalate_to: "[]" },
   { id: "p_jobs", name: "Data jobs", description: "Nightly backups and exports", remind_min: 0, escalate_min: 0, escalate_to: "[]" },
 ];
@@ -51,7 +51,7 @@ const okHeaders = [["content-type", "application/json"], ["server", "cloudflare"
 for (const m of monitors) {
   const hb = m.type === "heartbeat";
   const interval = m.interval ?? 300;
-  const steps = (m.steps ?? []).map((s) => ({ ...s, request: JSON.stringify(parseCurl(s.curl)) }));
+  const steps = (m.steps ?? []).map((s) => ({ name: s.name, curl: s.curl, request: JSON.stringify(parseCurl(s.curl)), vars: s.vars }));
   const step = hb ? interval * 1000 : 5 * MIN; // history resolution
   let lastOk = null, last = null;
   const rows = []; // checks and events, written after their monitor
@@ -115,4 +115,5 @@ for (const m of monitors) {
 
 out.push(insert("expiry", { host: "api.shop.example.com", kind: "ssl", expires_at: now + 54 * DAY, checked_at: now, error: null, warned: 0 }));
 out.push(insert("expiry", { host: "example.com", kind: "domain", expires_at: now + 212 * DAY, checked_at: now, error: null, warned: 0 }));
+out.push(insert("maintenance", { id: "w_db", project_id: "p_auth", title: "Database upgrade", starts_at: now + 2 * DAY, ends_at: now + 2 * DAY + 2 * HOUR, repeat: "weekly", created_by: user, created_at: now }));
 console.log(out.join("\n"));

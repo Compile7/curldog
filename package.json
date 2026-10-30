@@ -1,7 +1,7 @@
 {
   "name": "curldog",
   "version": "1.0.0",
-  "description": "Self-hosted HTTP monitoring on Cloudflare Workers. Paste a curl, get alerts in Google Chat, Telegram, Slack or Discord.",
+  "description": "Self-hosted HTTP monitoring on Cloudflare Workers. Paste a curl, get alerts in Google Chat, Telegram, Slack, Discord, email, PagerDuty or SMS.",
   "license": "MIT",
   "private": true,
   "type": "module",

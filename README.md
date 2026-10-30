@@ -75,11 +75,11 @@ Curly is an apricot poodle with one job: watch your endpoints and bark the momen
 <td width="50%" valign="top">
 
 ### Alerts people actually read
-- **Google Chat** cards and **Telegram** messages with **Open · Acknowledge · Mute 1h** buttons. Slack and Discord webhooks work too.
+- **Google Chat** cards and **Telegram** messages with **Open · Acknowledge · Mute 1h** buttons. Slack, Discord, **email**, **PagerDuty** and **SMS** work too.
 - Each alert includes the status, a body snippet, 7-day uptime, and an **AI summary of the likely cause** (Workers AI).
 - One message per project when several monitors fail together, not a flood.
 - **Reminders and escalation** until someone acknowledges.
-- **Slow alerts** when responses stay over a threshold. **Mute** windows for deploys.
+- **Slow alerts** when responses stay over a threshold. **Scheduled maintenance** windows, or a quick **Mute** for deploys.
 
 </td>
 </tr>
@@ -99,6 +99,8 @@ Curly is an apricot poodle with one job: watch your endpoints and bark the momen
 - Uptime for 24h, 7d and 30d, response-time chart, incident timeline.
 - **Weekly report** in your chat every Monday.
 - **SSL certificate and domain expiry** warnings at 14 and 3 days.
+- **Public status page** per project, with 30-day uptime bars and incidents.
+- **Monitors as code**: pull, plan and apply a JSON file over the API.
 - **Import from Uptime Kuma**, one project per site, notifications included.
 
 </td>
@@ -174,12 +176,66 @@ Go to **Notifications**, pick a channel, and click **Send test**.
 | **Google Chat** | Space → **Apps & integrations → Webhooks** → add one, paste the URL. |
 | **Telegram** | Message **@BotFather** → `/newbot` → paste the token. Add the bot to your group, send a message, click **Detect**. |
 | **Slack / Discord** | Paste an incoming webhook URL. |
+| **Email** | Create a [Resend](https://resend.com) API key and verify your sending domain. Free for 3,000 emails a month. |
+| **PagerDuty** | Service → **Integrations** → **Events API V2** → paste the integration key. Down opens an incident, Acknowledge acknowledges it, and recovery resolves it. |
+| **SMS** | Paste your Twilio Account SID, Auth Token and sender number. Only incidents are texted, not reports. |
 
-### 4. (Optional) Allow heartbeat pings
+### 4. (Optional) Open the public paths
 
-Heartbeats are called by your servers, which can't sign in to Access. Add one more Access application for the path **`/hb`** on the same domain, with a **Bypass** policy for *Everyone*. Each ping URL carries its own random token, and a ping can only say "I'm alive".
+Two paths are meant for people and servers that can't sign in to Access:
+
+- **`/hb`** for heartbeat pings from your cron jobs. Each ping URL carries its own random token, and a ping can only say "I'm alive".
+- **`/status`** for public status pages. They show monitor names and uptime only, never URLs or errors.
+
+For each one you use, add an Access application for that path on the same domain, with a **Bypass** policy for *Everyone*.
 
 ## 🧭 Using it
+
+<details>
+<summary><b>Public status page</b></summary>
+
+In **Project settings**, tick **Public status page** and pick an address, like `/status/acme`. The page shows:
+
+- one line per monitor, with 30 days of daily uptime bars,
+- open and upcoming maintenance,
+- incidents from the last 14 days.
+
+It never shows URLs, error messages or responses. It refreshes every minute.
+</details>
+
+<details>
+<summary><b>Maintenance windows</b></summary>
+
+On a project, click the **wrench** and schedule a window: once, every day, or every week. While it's open:
+
+- the project's monitors aren't checked, so nothing alerts and no downtime is counted,
+- the status page says "Scheduled maintenance in progress".
+
+For a quick one-off, **Mute** still works too. Mute keeps checking but stops the messages.
+</details>
+
+<details>
+<summary><b>API and monitors as code</b></summary>
+
+Everything the UI does goes through a JSON API under `/api`. Scripts sign in with a **Cloudflare Access service token**:
+
+1. Zero Trust → **Access → Service credentials** → create a service token.
+2. In CurlDog's Access application, add a policy with action **Service Auth** that includes that token.
+3. Send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers with each request.
+
+`scripts/curldog.mjs` keeps your monitors in a JSON file you can review in pull requests:
+
+```sh
+export CURLDOG_URL=https://curldog.acme.workers.dev CF_ACCESS_CLIENT_ID=… CF_ACCESS_CLIENT_SECRET=…
+node scripts/curldog.mjs pull > curldog.json   # export what's live
+node scripts/curldog.mjs plan curldog.json     # show what would change
+node scripts/curldog.mjs apply curldog.json    # create and update; add --prune to delete monitors not in the file
+```
+
+- Projects and monitors are matched by name. Fields you leave out keep their current value.
+- Channels are referenced by name and never created from the file, because they hold secrets.
+- `${NAME}` in the file is replaced with the environment variable `NAME`, so API keys in curl headers can stay out of git.
+</details>
 
 <details>
 <summary><b>Multi-step check: log in, then call an authenticated endpoint</b></summary>
@@ -244,7 +300,8 @@ flowchart LR
   W -->|curl requests| T[Your endpoints]
   P --> T
   J[Your cron jobs] -->|/hb/token| W
-  W --> G[Google Chat · Telegram<br/>Slack · Discord]
+  W --> G[Google Chat · Telegram · Slack<br/>Discord · Email · PagerDuty · SMS]
+  V[Your customers] -->|/status/slug| W
 ```
 
 - **One Worker** serves the UI (static files, no build step) and the JSON API.
@@ -290,8 +347,12 @@ Local dev runs with `--local`, so AI summaries are skipped (Workers AI only runs
 
 ## 🗺 Roadmap
 
-- [ ] Public status pages per project
-- [ ] Microsoft Teams, PagerDuty and email channels
+- [x] Public status pages per project
+- [x] PagerDuty, email and SMS channels
+- [x] Scheduled maintenance windows
+- [x] API and monitors as code
+- [ ] Microsoft Teams channel
+- [ ] Custom domains and branding for status pages
 - [ ] JSON assertions (`$.status == "ok"`)
 - [ ] TCP and DNS monitors
 - [ ] Queue-based fan-out for very large installs

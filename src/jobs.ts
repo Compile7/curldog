@@ -1,4 +1,4 @@
-// Cron work beyond running checks: reminders and escalation, the weekly report, SSL and domain expiry.
+// Cron work beyond running checks: maintenance windows, reminders and escalation, the weekly report, SSL and domain expiry.
 import type { Row } from "./check.ts";
 import { reminderCard, sendAll, type Alert, type Card, type Channel } from "./notify.ts";
 
@@ -19,11 +19,41 @@ export function alertFrom(m: Row, kind: Alert["kind"] = "down"): Alert {
   };
 }
 
+// --- maintenance windows ---
+
+export interface Window {
+  id: string;
+  project_id: string;
+  title: string;
+  starts_at: number;
+  ends_at: number;
+  repeat: "none" | "daily" | "weekly";
+}
+
+const PERIOD = { none: 0, daily: DAY, weekly: 7 * DAY };
+
+// The occurrence that's open now, else the next one. null when a one-off window is over.
+// ponytail: repeats every 24h / 7d in absolute time, so a window set in local time shifts an hour when DST changes.
+// Store a timezone and compute occurrences in it if that bites.
+export function occurrence(w: Pick<Window, "starts_at" | "ends_at" | "repeat">, now: number): { start: number; end: number } | null {
+  const p = PERIOD[w.repeat];
+  if (!p || now < w.starts_at) return now < w.ends_at ? { start: w.starts_at, end: w.ends_at } : null;
+  const len = w.ends_at - w.starts_at;
+  const start = now - ((now - w.starts_at) % p);
+  return now < start + len ? { start, end: start + len } : { start: start + p, end: start + p + len };
+}
+
+// Projects with a window open right now: their monitors aren't checked and nobody is alerted.
+export async function inMaintenance(db: D1Database, now: number): Promise<Set<string>> {
+  const { results } = await db.prepare("SELECT project_id, starts_at, ends_at, repeat FROM maintenance").all<Window>();
+  return new Set(results.filter((w) => (occurrence(w, now)?.start ?? Infinity) <= now).map((w) => w.project_id));
+}
+
 // --- reminders and escalation ---
 
 type Pending = Row & { remind_min: number; escalate_min: number; escalate_to: string };
 
-export async function remind(env: JobEnv, now: number, channels: Map<string, Channel[]>) {
+export async function remind(env: JobEnv, now: number, channels: Map<string, Channel[]>, maintenance = new Set<string>()) {
   const { results } = await env.DB.prepare(`
     SELECT m.*, p.name AS project_name, p.muted_until AS project_muted_until, p.remind_min, p.escalate_min, p.escalate_to
     FROM monitors m JOIN projects p ON p.id = m.project_id
@@ -33,7 +63,7 @@ export async function remind(env: JobEnv, now: number, channels: Map<string, Cha
   const all = new Map((await env.DB.prepare("SELECT id, type, config FROM channels").all<Channel & { id: string }>()).results.map((c) => [c.id, c]));
   const app = env.APP_URL ?? "";
   for (const m of results) {
-    if (Math.max(m.muted_until, m.project_muted_until ?? 0) > now) continue;
+    if (maintenance.has(m.project_id) || Math.max(m.muted_until, m.project_muted_until ?? 0) > now) continue;
     const downFor = now - m.down_since!;
     if (m.escalate_min > 0 && !m.escalated_at && downFor >= m.escalate_min * 60_000) {
       const to = (JSON.parse(m.escalate_to) as string[]).map((id) => all.get(id)).filter((c) => c) as Channel[];

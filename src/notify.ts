@@ -1,11 +1,12 @@
-// Builds and sends messages to Google Chat, Telegram, and Slack/Discord-style webhooks.
+// Builds and sends messages to Google Chat, Telegram, Slack/Discord-style webhooks, email, PagerDuty and SMS.
 // Every message is a Card first; each channel type renders it in its own markup.
 
-export type ChannelType = "google_chat" | "telegram" | "webhook";
+export type ChannelType = "google_chat" | "telegram" | "webhook" | "email" | "pagerduty" | "sms";
 
 export interface Channel {
   type: ChannelType;
-  config: string; // JSON: {url} or {token, chat_id}
+  // JSON: {url} | {token, chat_id} | email {api_key, from, to} | pagerduty {routing_key} | sms {account_sid, auth_token, from, to}
+  config: string;
 }
 
 export interface Alert {
@@ -33,6 +34,14 @@ export interface Card {
   title: string;
   lines: Line[];
   buttons: { label: string; url: string }[];
+  // Set on cards about an incident. PagerDuty and SMS only get these; reports and expiry warnings stay in chat and email.
+  incidents?: Incident[];
+}
+
+export interface Incident {
+  key: string; // stable per monitor, so PagerDuty dedupes triggers and resolves the right incident
+  action: "trigger" | "acknowledge" | "resolve";
+  severity: "critical" | "warning" | "info";
 }
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -60,7 +69,17 @@ function links(app: string, a: { monitorId: string }, which: ("open" | "ack" | "
 const name = (a: Alert) => `${a.project} / ${a.monitor}`;
 const target = (a: Alert) => [a.method, a.url].filter(Boolean).join(" ");
 
+const incident = (a: Pick<Alert, "kind" | "monitorId">): Incident => ({
+  key: a.kind === "slow" || a.kind === "fast" ? `${a.monitorId}:slow` : a.monitorId,
+  action: a.kind === "down" || a.kind === "slow" ? "trigger" : "resolve",
+  severity: a.kind === "down" ? "critical" : "warning",
+});
+
 export function alertCard(a: Alert, app = ""): Card {
+  return { ...alertBody(a, app), incidents: [incident(a)] };
+}
+
+function alertBody(a: Alert, app: string): Card {
   if (a.kind === "down") {
     const facts: (string | number)[] = a.method ? [a.statusCode ?? "No response", ms(a.latencyMs)] : [];
     if (a.uptime7d != null) facts.push(`7-day uptime ${pct(a.uptime7d)}`);
@@ -99,6 +118,7 @@ export function groupCard(alerts: Alert[], app = ""): Card {
     title: `${down ? "🔴" : "🟢"} ${alerts[0].project}: ${parts.join(", ")}`,
     lines: alerts.map((a) => `${icon[a.kind]} ${a.monitor}: ${a.kind === "down" ? a.error ?? "Check failed" : a.kind === "up" && a.downForMs ? `up after ${duration(a.downForMs)}` : a.kind === "slow" ? `${ms(a.latencyMs)}` : "OK"}`),
     buttons: app ? [{ label: "Open project", url: `${app.replace(/\/$/, "")}/projects/${alerts[0].projectId}` }] : [],
+    incidents: alerts.map(incident),
   };
 }
 
@@ -107,14 +127,22 @@ export function reminderCard(a: Alert, downForMs: number, escalated: boolean, ap
     title: `${escalated ? "🚨 ESCALATED:" : "⏰ Still DOWN:"} ${name(a)} (${duration(downForMs)})`,
     lines: [a.error ?? "Check failed", target(a), "Nobody has acknowledged this yet."],
     buttons: links(app, a, ["open", "ack", "mute"]),
+    incidents: [{ ...incident(a), severity: "critical" }],
   };
 }
 
 export function ackCard(a: Pick<Alert, "monitorId" | "project" | "monitor">, by: string, app = ""): Card {
-  return { title: `👀 ${by} is on ${a.project} / ${a.monitor}`, lines: ["Acknowledged. Reminders are stopped for this incident."], buttons: links(app, a, ["open"]) };
+  return {
+    title: `👀 ${by} is on ${a.project} / ${a.monitor}`, lines: ["Acknowledged. Reminders are stopped for this incident."], buttons: links(app, a, ["open"]),
+    incidents: [{ key: a.monitorId, action: "acknowledge", severity: "critical" }],
+  };
 }
 
-export const testCard = (): Card => ({ title: "✅ CurlDog test", lines: ["This channel will get alerts when monitors go down or recover."], buttons: [] });
+// PagerDuty gets a test incident that resolves itself straight away.
+export const testCard = (): Card => ({
+  title: "✅ CurlDog test", lines: ["This channel will get alerts when monitors go down or recover."], buttons: [],
+  incidents: [{ key: "test", action: "trigger", severity: "info" }, { key: "test", action: "resolve", severity: "info" }],
+});
 
 // --- rendering per channel type ---
 
@@ -137,6 +165,22 @@ function plain(card: Card, bold: (s: string) => string, link: (url: string, labe
     .filter(Boolean).join("\n");
 }
 
+// One Events API v2 call per incident on the card. Cards without incidents (reports, expiry) aren't sent.
+export function pagerDuty(routingKey: string, card: Card) {
+  return (card.incidents ?? []).map((i) => ({
+    routing_key: routingKey,
+    event_action: i.action,
+    dedup_key: `curldog-${i.key}`,
+    ...(i.action === "trigger" ? {
+      payload: {
+        summary: card.title.slice(0, 1024), source: "CurlDog", severity: i.severity,
+        custom_details: { details: card.lines.map((l) => (typeof l === "string" ? l : l.code)).join("\n") },
+      },
+      links: card.buttons.slice(0, 1).map((b) => ({ href: b.url, text: "Open in CurlDog" })),
+    } : {}),
+  }));
+}
+
 export function buildRequest(ch: Channel, card: Card, asText = false): { url: string; body: unknown } {
   const cfg = JSON.parse(ch.config);
   if (ch.type === "telegram") return { url: `https://api.telegram.org/bot${cfg.token}/sendMessage`, body: { chat_id: cfg.chat_id, ...telegram(card) } };
@@ -145,21 +189,53 @@ export function buildRequest(ch: Channel, card: Card, asText = false): { url: st
   return { url: cfg.url, body: { text: slack, content: plain(card, (s) => `**${s}**`, (url, label) => `${label}: ${url}`) } };
 }
 
-async function post(url: string, body: unknown) {
+function email(card: Card) {
+  const line = (l: Line) => (typeof l === "string"
+    ? `<p style="margin:0 0 10px">${escHtml(l)}</p>`
+    : `<pre style="margin:0 0 10px;padding:10px;background:#f5f0ea;border-radius:6px;white-space:pre-wrap">${escHtml(l.code)}</pre>`);
+  const buttons = card.buttons.map((b) => `<a href="${escHtml(b.url)}" style="display:inline-block;margin-right:8px;padding:8px 14px;background:#C97B3A;color:#fff;border-radius:6px;text-decoration:none">${escHtml(b.label)}</a>`).join("");
+  return {
+    subject: card.title,
+    html: `<div style="font:15px/1.5 -apple-system,Segoe UI,sans-serif;color:#3B2418;max-width:600px"><h2 style="margin:0 0 14px;font-size:18px">${escHtml(card.title)}</h2>${card.lines.map(line).join("")}${buttons ? `<p style="margin-top:16px">${buttons}</p>` : ""}<p style="margin-top:24px;color:#9a8574;font-size:12px">Sent by CurlDog</p></div>`,
+    text: plain(card, (s) => s, (url, label) => `${label}: ${url}`),
+  };
+}
+
+// SMS: title and the first line only. Twilio splits anything longer into several billed segments.
+const sms = (card: Card) => [card.title, ...card.lines.filter((l) => typeof l === "string").slice(0, 1)].join("\n").slice(0, 300);
+const recipients = (to: string) => to.split(",").map((s) => s.trim()).filter(Boolean);
+
+async function post(url: string, body: unknown, headers: Record<string, string> = {}) {
+  const form = body instanceof URLSearchParams;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "content-type": form ? "application/x-www-form-urlencoded" : "application/json", ...headers },
+    body: form ? body : JSON.stringify(body),
     signal: AbortSignal.timeout(10_000),
   });
   if (res.ok) return;
   const detail = await res.text().catch(() => "");
   let reason = detail.slice(0, 200);
-  try { reason = JSON.parse(detail).description ?? JSON.parse(detail).error?.message ?? reason; } catch {}
+  try { const d = JSON.parse(detail); reason = d.description ?? d.error?.message ?? d.message ?? reason; } catch {}
   throw new Error(`${res.status} ${reason}`.trim());
 }
 
 export async function send(ch: Channel, card: Card): Promise<void> {
+  const cfg = JSON.parse(ch.config);
+  if (ch.type === "email") {
+    return post("https://api.resend.com/emails", { from: cfg.from, to: recipients(cfg.to), ...email(card) }, { authorization: `Bearer ${cfg.api_key}` });
+  }
+  if (ch.type === "pagerduty") {
+    for (const body of pagerDuty(cfg.routing_key, card)) await post("https://events.pagerduty.com/v2/enqueue", body);
+    return;
+  }
+  if (ch.type === "sms") {
+    if (!card.incidents) return;
+    const auth = { authorization: `Basic ${btoa(`${cfg.account_sid}:${cfg.auth_token}`)}` };
+    await Promise.all(recipients(cfg.to).map((to) => post(`https://api.twilio.com/2010-04-01/Accounts/${cfg.account_sid}/Messages.json`,
+      new URLSearchParams({ From: cfg.from, To: to, Body: sms(card) }), auth)));
+    return;
+  }
   const { url, body } = buildRequest(ch, card);
   try {
     await post(url, body);
