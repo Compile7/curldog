@@ -16,11 +16,17 @@ No servers, no containers, no database to babysit.
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-2563eb.svg)](CONTRIBUTING.md)
 ![Runs on Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020?logo=cloudflare&logoColor=white)
 
+<sub>Sponsored by <a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=header"><b>SSOJet</b></a>: enterprise SSO for B2B SaaS</sub>
+
 [Deploy](#-deploy-in-5-minutes) · [Features](#-features) · [How it works](#-how-it-works) · [Local dev](#-local-development) · [Contributing](CONTRIBUTING.md)
 
 <br>
 
 <img src="docs/screenshots/overview.png" alt="Moniwork overview: one monitor down, project health, recent incidents" width="100%">
+
+<br><br>
+
+<a href="https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=banner"><img src="docs/sponsors/ssojet-banner.svg" alt="Sponsored by SSOJet: Enterprise SSO your security team will approve. Add enterprise SSO to your B2B SaaS in days, not months." width="100%"></a>
 
 </div>
 
@@ -283,6 +289,10 @@ Have an idea? [Open a feature request](https://github.com/Compile7/moniwork/issu
 Contributions of all sizes are welcome: a typo fix, a new curl flag, a new alert channel. Start with [CONTRIBUTING.md](CONTRIBUTING.md). `npm run seed` gives you a populated app in seconds.
 
 Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security issue? See [SECURITY.md](SECURITY.md) and report it privately.
+
+## 💜 Sponsor
+
+Moniwork is sponsored by **[SSOJet](https://ssojet.com/?utm_source=github&utm_medium=readme&utm_campaign=moniwork&utm_content=sponsor-section)**. SSOJet adds enterprise SSO to your B2B SaaS in days, not months. Connect 100+ identity providers over SAML, OIDC and SCIM without rebuilding your auth.
 
 ## 📄 License
 
